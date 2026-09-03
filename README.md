@@ -9,7 +9,8 @@
 | Area | Implementation |
 |---|---|
 | Sign-in and session | Opens `https://m.vk.com/audio` in a persistent WebView. Cookies, DOM storage, and WebView cache are enabled and cookies are flushed after navigation. |
-| D-pad operation | A high-contrast virtual pointer moves on `DPAD_*`; **OK/Enter** dispatches a complete touch gesture at the pointer's location. **Back** follows the WebView history. **Menu/Search** focuses a likely site-search input. |
+| D-pad operation | A clean pointer moves on `DPAD_*` with a short, precise step; **OK/Enter** dispatches a complete touch gesture at the pointer's location. **Back** follows the WebView history. **Menu/Search** focuses a likely site-search input. |
+| TV text entry | When a VK input or textarea receives focus, a large on-screen keyboard opens. It supports digits, English/Russian letters, space, backspace, language switching, and Done/close actions. |
 | Playback controls | A platform `MediaSession` receives standard headset/remote play, pause, next and previous actions, and uses best-effort semantic selectors to pass them to VK's HTML player. |
 | TV presentation | Landscape-only full-screen activity, dark base surface, large first-run hint, visible cursor, launcher and Leanback launcher entries. |
 | Compatibility | Kotlin, `minSdk 21`, `targetSdk 35`, no external runtime UI dependencies. |
@@ -29,6 +30,7 @@
 | OK / Enter | Clicks at the virtual cursor location. |
 | Back | Goes to the previous webpage; exits at the start page. |
 | Menu / Search | Focuses a search field where VK exposes one. |
+| On-screen keyboard | Use arrows to select a key, **OK** to enter it, **Рус/Eng** to switch alphabet, and **Готово** to close the keyboard. |
 | Headset/media keys | Passes play, pause, next or previous commands to the website on a best-effort basis. |
 
 ## Build from a terminal

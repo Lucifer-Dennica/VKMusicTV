@@ -43,9 +43,12 @@ jobs:
           pwd
           find . -maxdepth 4 -type f | sort
 
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
       - name: Build debug APK
         run: |
-          gradle :app:assembleDebug --stacktrace --info
+          ./gradlew :app:assembleDebug --stacktrace --info
 
       - name: Check APK
         run: |
@@ -55,6 +58,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VKMusicTV-debug-apk
+          name: VideoDownloader-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error

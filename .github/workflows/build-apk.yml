@@ -45,12 +45,14 @@ jobs:
           pwd
           find . -maxdepth 4 -type f | sort
 
+      - name: Generate Gradle Wrapper
+        run: gradle wrapper --gradle-version 8.10.2
+
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
 
       - name: Build debug APK
-        run: |
-          ./gradlew :app:assembleDebug --stacktrace --info
+        run: ./gradlew :app:assembleDebug --stacktrace --info
 
       - name: Check APK
         run: |

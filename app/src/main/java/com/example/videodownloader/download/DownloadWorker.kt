@@ -6,10 +6,12 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
 import com.example.videodownloader.data.repository.DownloadRepository
-import com.yausername.youtubedl_android.YoutubeDL
-import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.flow.first
+import org.json.JSONObject
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
 
 class DownloadWorker(
     appContext: Context,
@@ -22,72 +24,124 @@ class DownloadWorker(
 
         val repository = DownloadRepository(applicationContext)
         val current = repository.items.first().firstOrNull { it.id == id }
-
         current?.let { repository.update(it.copy(status = "DOWNLOADING", progress = 0)) }
 
-        val dir = File(
-            applicationContext.getExternalFilesDir("Movies"),
-            "VideoDownloader"
-        ).apply { mkdirs() }
-
-        val request = YoutubeDLRequest(url)
-        request.addOption("-o", "${dir.absolutePath}/%(title)s.%(ext)s")
-        request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
-        request.addOption("--no-playlist")
-        request.addOption("--restrict-filenames")
-
-        // User-Agent для TikTok и других сервисов — без него часто 403
-        request.addOption(
-            "--user-agent",
-            "Mozilla/5.0 (Linux; Android 13; SM-G991B) AppleWebKit/537.36 " +
-            "(KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-        )
-
-        // Заголовок Referer часто помогает с TikTok
-        if (url.contains("tiktok.com")) {
-            request.addOption("--referer", "https://www.tiktok.com/")
-        }
-
-        // Cookies — критично для TikTok, Instagram и возрастных видео
-        val cookiesFile = File(applicationContext.filesDir, "cookies.txt")
-        if (cookiesFile.exists() && cookiesFile.length() > 0) {
-            request.addOption("--cookies", cookiesFile.absolutePath)
-        }
-
-        // Таймаут сокета, чтобы не висло вечно
-        request.addOption("--socket-timeout", "30")
-        request.addOption("--retries", "2")
-
-        var lastFile: String? = null
+        val dir = File(applicationContext.getExternalFilesDir("Movies"), "VideoDownloader")
+            .apply { mkdirs() }
 
         return try {
-            YoutubeDL.getInstance().execute(request, null) { _, _, line ->
-                Log.d("DownloadWorker", line)
-                if (line.contains("[download] Destination:")) {
-                    lastFile = line.substringAfter("Destination:").trim()
-                }
-            }
+            val directUrl = resolveDirectUrl(url)
+                ?: throw Exception("Не удалось получить ссылку на видео")
+
+            val outFile = File(dir, "video_${id}.mp4")
+            downloadFile(directUrl, outFile)
 
             current?.let {
-                repository.update(
-                    it.copy(
-                        filePath = lastFile ?: dir.absolutePath,
-                        status = "COMPLETED",
-                        progress = 100,
-                        error = null
-                    )
-                )
+                repository.update(it.copy(
+                    filePath = outFile.absolutePath,
+                    status = "COMPLETED",
+                    progress = 100,
+                    error = null
+                ))
             }
-            Result.success(workDataOf(KEY_FILE to (lastFile ?: dir.absolutePath)))
+            Result.success(workDataOf(KEY_FILE to outFile.absolutePath))
         } catch (e: Exception) {
-            Log.e("DownloadWorker", "Ошибка скачивания", e)
+            Log.e("DownloadWorker", "Ошибка", e)
             current?.let {
-                repository.update(
-                    it.copy(status = "ERROR", error = e.message ?: "Ошибка загрузки")
-                )
+                repository.update(it.copy(status = "ERROR", error = e.message))
             }
-            Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Ошибка загрузки")))
+            Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Ошибка")))
         }
+    }
+
+    private fun resolveDirectUrl(url: String): String? {
+        return when {
+            url.contains("tiktok.com") -> resolveTikTok(url)
+            url.contains("instagram.com") -> resolveInstagram(url)
+            else -> resolveCobalt(url)
+        }
+    }
+
+    /** TikTok через tikwm.com — уже проверено, работает. */
+    private fun resolveTikTok(url: String): String? {
+        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
+        val json = httpGetString(api) ?: return null
+        val obj = JSONObject(json)
+        if (obj.optInt("code", -1) != 0) {
+            throw Exception("tikwm: " + obj.optString("msg"))
+        }
+        return obj.getJSONObject("data").optString("play").ifBlank { null }
+    }
+
+    /** Instagram — пробуем через Cobalt (иногда работает для публичных). */
+    private fun resolveInstagram(url: String): String? {
+        return try {
+            resolveCobalt(url)
+        } catch (e: Exception) {
+            throw Exception(
+                "Instagram требует авторизации. " +
+                "Откройте «Настройки → Как скачать из Instagram» и следуйте инструкции."
+            )
+        }
+    }
+
+    /** Универсальный метод через Cobalt API. */
+    private fun resolveCobalt(url: String): String? {
+        val api = "https://api.cobalt.tools/api/json"
+        val body = """{"url":"$url","vQuality":"720","isAudioOnly":false}"""
+        val response = httpPostJson(api, body) ?: return null
+        val obj = JSONObject(response)
+        if (obj.optString("status") == "error") {
+            throw Exception("Cobalt: " + obj.optString("text", "error"))
+        }
+        return obj.optString("url").ifBlank { null }
+    }
+
+    private fun httpGetString(apiUrl: String): String? {
+        val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "GET"
+            connectTimeout = 20_000
+            readTimeout = 30_000
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        return try {
+            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            conn.inputStream.bufferedReader().readText()
+        } finally { conn.disconnect() }
+    }
+
+    private fun httpPostJson(apiUrl: String, body: String): String? {
+        val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            connectTimeout = 20_000
+            readTimeout = 30_000
+            doOutput = true
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Accept", "application/json")
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        return try {
+            conn.outputStream.use { it.write(body.toByteArray()) }
+            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            conn.inputStream.bufferedReader().readText()
+        } finally { conn.disconnect() }
+    }
+
+    private fun downloadFile(url: String, outFile: File) {
+        val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+            connectTimeout = 20_000
+            readTimeout = 60_000
+            instanceFollowRedirects = true
+            setRequestProperty("User-Agent", USER_AGENT)
+        }
+        try {
+            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            conn.inputStream.use { input ->
+                outFile.outputStream().use { output ->
+                    input.copyTo(output, 64 * 1024)
+                }
+            }
+        } finally { conn.disconnect() }
     }
 
     companion object {
@@ -96,5 +150,7 @@ class DownloadWorker(
         const val KEY_PROGRESS = "progress"
         const val KEY_FILE = "file"
         const val KEY_ERROR = "error"
+        private const val USER_AGENT =
+            "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
     }
 }

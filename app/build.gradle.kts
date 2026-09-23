@@ -74,7 +74,7 @@ dependencies {
 
     implementation("androidx.datastore:datastore-preferences:1.1.2")
 
-        // yt-dlp (скачивание из YouTube, TikTok, Instagram и др.)
-    implementation("com.github.yausername.youtubedl-android:library:0.15.0")
-    implementation("com.github.yausername.youtubedl-android:ffmpeg:0.15.0")
+    // yt-dlp (скачивание из YouTube, TikTok, Instagram и др.)
+    implementation("io.github.junkfood02.youtubedl-android:library:0.18.1")
+    implementation("io.github.junkfood02.youtubedl-android:ffmpeg:0.18.1")
 }

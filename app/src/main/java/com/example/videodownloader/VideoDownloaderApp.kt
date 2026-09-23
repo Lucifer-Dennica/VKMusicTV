@@ -14,9 +14,7 @@ class VideoDownloaderApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
-
-        // Форсируем инициализацию WorkManager при старте,
-        // иначе первая задача может застрять в QUEUED
+        // Форсируем инициализацию WorkManager
         WorkManager.getInstance(this)
     }
 }

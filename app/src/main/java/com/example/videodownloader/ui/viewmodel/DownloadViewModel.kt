@@ -3,7 +3,6 @@ package com.example.videodownloader.ui.viewmodel
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import androidx.work.BackoffPolicy
 import androidx.work.Constraints
 import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequestBuilder
@@ -16,7 +15,6 @@ import com.example.videodownloader.util.UrlParser
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import java.util.concurrent.TimeUnit
 
 class DownloadViewModel(app: Application) : AndroidViewModel(app) {
 
@@ -28,7 +26,7 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         emptyList()
     )
 
-        fun enqueue(raw: String) {
+    fun enqueue(raw: String) {
         val parsed = UrlParser.parse(raw) ?: return
         viewModelScope.launch {
             val id = repo.add(parsed.value, "Видео • ${parsed.service}")

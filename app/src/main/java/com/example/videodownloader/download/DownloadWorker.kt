@@ -1,7 +1,14 @@
 package com.example.videodownloader.download
 
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.content.ContentValues
 import android.content.Context
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.util.Log
+import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
@@ -26,35 +33,46 @@ class DownloadWorker(
         val current = repository.items.first().firstOrNull { it.id == id }
         current?.let { repository.update(it.copy(status = "DOWNLOADING", progress = 0)) }
 
-        val dir = File(applicationContext.getExternalFilesDir("Movies"), "VideoDownloader")
-            .apply { mkdirs() }
+        showNotification(id, "Скачивание…", 0, ongoing = true)
 
         return try {
-            val directUrl = resolveDirectUrl(url)
+            val resolved = resolveDirectUrl(url)
                 ?: throw Exception("Не удалось получить ссылку на видео")
 
-            val outFile = File(dir, "video_${id}.mp4")
-            downloadFile(directUrl, outFile)
+            current?.let {
+                repository.update(it.copy(thumbnailUrl = resolved.thumbnail, progress = 5))
+            }
+
+            val tempFile = File(applicationContext.cacheDir, "video_$id.mp4")
+            downloadFile(resolved.videoUrl, tempFile, id, repository, current)
+
+            val fileName = "video_${id}_${System.currentTimeMillis()}.mp4"
+            val savedPath = saveToPublicDcim(tempFile, fileName)
+            tempFile.delete()
 
             current?.let {
                 repository.update(it.copy(
-                    filePath = outFile.absolutePath,
+                    filePath = savedPath,
                     status = "COMPLETED",
                     progress = 100,
                     error = null
                 ))
             }
-            Result.success(workDataOf(KEY_FILE to outFile.absolutePath))
+            showNotification(id, "✅ Видео скачано", 100, ongoing = false)
+            Result.success(workDataOf(KEY_FILE to savedPath))
         } catch (e: Exception) {
             Log.e("DownloadWorker", "Ошибка", e)
             current?.let {
                 repository.update(it.copy(status = "ERROR", error = e.message))
             }
+            showNotification(id, "❌ Ошибка: ${e.message}", 0, ongoing = false)
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Ошибка")))
         }
     }
 
-    private fun resolveDirectUrl(url: String): String? {
+    data class Resolved(val videoUrl: String, val thumbnail: String?)
+
+    private fun resolveDirectUrl(url: String): Resolved? {
         return when {
             url.contains("tiktok.com") -> resolveTikTok(url)
             url.contains("instagram.com") -> resolveInstagram(url)
@@ -62,31 +80,26 @@ class DownloadWorker(
         }
     }
 
-    /** TikTok через tikwm.com — уже проверено, работает. */
-    private fun resolveTikTok(url: String): String? {
+    private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
         val json = httpGetString(api) ?: return null
         val obj = JSONObject(json)
-        if (obj.optInt("code", -1) != 0) {
-            throw Exception("tikwm: " + obj.optString("msg"))
-        }
-        return obj.getJSONObject("data").optString("play").ifBlank { null }
+        if (obj.optInt("code", -1) != 0) throw Exception("tikwm: " + obj.optString("msg"))
+        val data = obj.getJSONObject("data")
+        val video = data.optString("play").ifBlank { null } ?: return null
+        val cover = data.optString("cover").ifBlank { null }
+        return Resolved(video, cover)
     }
 
-    /** Instagram — пробуем через Cobalt (иногда работает для публичных). */
-    private fun resolveInstagram(url: String): String? {
+    private fun resolveInstagram(url: String): Resolved? {
         return try {
             resolveCobalt(url)
         } catch (e: Exception) {
-            throw Exception(
-                "Instagram требует авторизации. " +
-                "Откройте «Настройки → Как скачать из Instagram» и следуйте инструкции."
-            )
+            throw Exception("Instagram требует авторизации. Настройки → Как скачать из Instagram.")
         }
     }
 
-    /** Универсальный метод через Cobalt API. */
-    private fun resolveCobalt(url: String): String? {
+    private fun resolveCobalt(url: String): Resolved? {
         val api = "https://api.cobalt.tools/api/json"
         val body = """{"url":"$url","vQuality":"720","isAudioOnly":false}"""
         val response = httpPostJson(api, body) ?: return null
@@ -94,7 +107,9 @@ class DownloadWorker(
         if (obj.optString("status") == "error") {
             throw Exception("Cobalt: " + obj.optString("text", "error"))
         }
-        return obj.optString("url").ifBlank { null }
+        val video = obj.optString("url").ifBlank { null } ?: return null
+        val thumb = obj.optString("thumbnail").ifBlank { null }
+        return Resolved(video, thumb)
     }
 
     private fun httpGetString(apiUrl: String): String? {
@@ -127,7 +142,13 @@ class DownloadWorker(
         } finally { conn.disconnect() }
     }
 
-    private fun downloadFile(url: String, outFile: File) {
+    private suspend fun downloadFile(
+        url: String,
+        outFile: File,
+        id: Long,
+        repository: DownloadRepository,
+        current: com.example.videodownloader.data.local.DownloadEntity?
+    ) {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
             readTimeout = 60_000
@@ -136,12 +157,79 @@ class DownloadWorker(
         }
         try {
             if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            val total = conn.contentLengthLong
+            var done = 0L
+            var lastNotified = 0
+
             conn.inputStream.use { input ->
                 outFile.outputStream().use { output ->
-                    input.copyTo(output, 64 * 1024)
+                    val buffer = ByteArray(64 * 1024)
+                    var read: Int
+                    while (input.read(buffer).also { read = it } != -1) {
+                        output.write(buffer, 0, read)
+                        done += read
+                        if (total > 0) {
+                            val percent = 5 + ((done * 90) / total).toInt()
+                            current?.let { repository.update(it.copy(progress = percent)) }
+                            if (percent - lastNotified >= 10) {
+                                lastNotified = percent
+                                showNotification(id, "Скачивание… $percent%", percent, ongoing = true)
+                            }
+                        }
+                    }
                 }
             }
         } finally { conn.disconnect() }
+    }
+
+    private fun saveToPublicDcim(tempFile: File, fileName: String): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
+                put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
+                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/VideoDownloader")
+                put(MediaStore.Video.Media.IS_PENDING, 1)
+            }
+            val resolver = applicationContext.contentResolver
+            val uri = resolver.insert(MediaStore.Video.Media.EXTERNAL_CONTENT_URI, values)
+                ?: throw Exception("Не удалось создать файл в MediaStore")
+
+            resolver.openOutputStream(uri).use { out ->
+                if (out == null) throw Exception("Не удалось открыть поток")
+                tempFile.inputStream().use { input -> input.copyTo(out, 64 * 1024) }
+            }
+
+            values.clear()
+            values.put(MediaStore.Video.Media.IS_PENDING, 0)
+            resolver.update(uri, values, null, null)
+            return uri.toString()
+        } else {
+            val dir = File(
+                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
+                "VideoDownloader"
+            ).apply { mkdirs() }
+            val target = File(dir, fileName)
+            tempFile.copyTo(target, overwrite = true)
+            return target.absolutePath
+        }
+    }
+
+    private fun showNotification(id: Long, text: String, progress: Int, ongoing: Boolean) {
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val channelId = "downloads"
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val channel = NotificationChannel(channelId, "Загрузки", NotificationManager.IMPORTANCE_LOW)
+            manager.createNotificationChannel(channel)
+        }
+        val notif = NotificationCompat.Builder(applicationContext, channelId)
+            .setSmallIcon(android.R.drawable.stat_sys_download)
+            .setContentTitle("VideoDownloader")
+            .setContentText(text)
+            .setProgress(100, progress, progress == 0)
+            .setOngoing(ongoing)
+            .setAutoCancel(!ongoing)
+            .build()
+        manager.notify(id.toInt(), notif)
     }
 
     companion object {

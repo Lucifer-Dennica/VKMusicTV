@@ -1,44 +1,81 @@
 package com.example.videodownloader.ui.components
 
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import coil.compose.AsyncImage
 import com.example.videodownloader.data.local.DownloadEntity
 
 @Composable
 fun DownloadItemCard(item: DownloadEntity, onDelete: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(16.dp)) {
-            Text(item.title, style = MaterialTheme.typography.titleMedium)
-            Text(item.status, color = MaterialTheme.colorScheme.secondary)
+        Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
 
-            if (item.status == "DOWNLOADING") {
-                LinearProgressIndicator(
-                    { item.progress / 100f },
-                    Modifier.fillMaxWidth()
+            if (item.thumbnailUrl != null) {
+                AsyncImage(
+                    model = item.thumbnailUrl,
+                    contentDescription = null,
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(8.dp)),
+                    contentScale = ContentScale.Crop
                 )
+                Spacer(Modifier.width(12.dp))
             }
 
-            // Показываем текст ошибки, если есть
-            item.error?.let { err ->
-                Spacer(Modifier.height(4.dp))
+            Column(Modifier.weight(1f)) {
                 Text(
-                    err,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.error,
-                    maxLines = 5,
+                    item.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
+                Spacer(Modifier.height(4.dp))
 
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End
-            ) {
-                TextButton(onClick = onDelete) { Text("Удалить") }
+                val statusText = when (item.status) {
+                    "QUEUED" -> "⏳ В очереди"
+                    "DOWNLOADING" -> "⬇️ Скачивание ${item.progress}%"
+                    "COMPLETED" -> "✅ Готово"
+                    "ERROR" -> "❌ Ошибка"
+                    else -> item.status
+                }
+                Text(
+                    statusText,
+                    color = MaterialTheme.colorScheme.secondary,
+                    style = MaterialTheme.typography.bodySmall
+                )
+
+                if (item.status == "DOWNLOADING") {
+                    Spacer(Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        progress = { item.progress / 100f },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+
+                item.error?.let { err ->
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        err,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                        maxLines = 4,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(Modifier.height(4.dp))
+                TextButton(
+                    onClick = onDelete,
+                    modifier = Modifier.align(Alignment.End)
+                ) { Text("Удалить") }
             }
         }
     }

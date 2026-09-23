@@ -28,7 +28,7 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         emptyList()
     )
 
-    fun enqueue(raw: String) {
+        fun enqueue(raw: String) {
         val parsed = UrlParser.parse(raw) ?: return
         viewModelScope.launch {
             val id = repo.add(parsed.value, "Видео • ${parsed.service}")
@@ -43,11 +43,6 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
                     Constraints.Builder()
                         .setRequiredNetworkType(NetworkType.CONNECTED)
                         .build()
-                )
-                .setBackoffCriteria(
-                    BackoffPolicy.LINEAR,
-                    10,
-                    TimeUnit.SECONDS
                 )
                 .build()
             WorkManager.getInstance(getApplication()).enqueue(request)

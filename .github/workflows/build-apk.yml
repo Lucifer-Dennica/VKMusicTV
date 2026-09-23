@@ -40,6 +40,11 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
+      - name: Clean Gradle cache (youtubedl-android)
+        run: |
+          rm -rf ~/.gradle/caches/modules-2/files-2.1/io.github.junkfood02 || true
+          rm -rf ~/.gradle/caches/modules-2/files-2.1/com.github.yausername || true
+
       - name: Show project structure
         run: |
           pwd
@@ -52,7 +57,7 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace --info
+        run: ./gradlew :app:assembleDebug --stacktrace --info --no-daemon
 
       - name: Check APK
         run: |

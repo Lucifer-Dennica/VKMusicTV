@@ -13,6 +13,7 @@ import com.example.videodownloader.data.repository.DownloadRepository
 import com.example.videodownloader.download.DownloadWorker
 import com.example.videodownloader.util.UrlParser
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -25,6 +26,16 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         SharingStarted.WhileSubscribed(5_000),
         emptyList()
     )
+
+    /** Только активные задачи — для отображения на главной. */
+    val activeItems = repo.items
+        .map { list -> list.filter { it.status == "QUEUED" || it.status == "DOWNLOADING" || it.status == "ERROR" } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+
+    /** Только завершённые — для экрана «Загрузки». */
+    val completedItems = repo.items
+        .map { list -> list.filter { it.status == "COMPLETED" } }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     fun enqueue(raw: String) {
         val parsed = UrlParser.parse(raw) ?: return

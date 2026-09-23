@@ -32,11 +32,10 @@ class MainActivity : ComponentActivity() {
 
     private val notifPermission = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* ничего не делаем */ }
+    ) { }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
@@ -60,7 +59,8 @@ private fun VideoDownloaderRoot(
     vm: DownloadViewModel = viewModel()
 ) {
     var tab by remember { mutableIntStateOf(0) }
-    val items by vm.items.collectAsState()
+    val active by vm.activeItems.collectAsState()
+    val completed by vm.completedItems.collectAsState()
 
     Scaffold(
         bottomBar = {
@@ -78,8 +78,8 @@ private fun VideoDownloaderRoot(
     ) { pad ->
         Box(Modifier.padding(pad)) {
             when (tab) {
-                0 -> HomeScreen(sharedLink, vm::enqueue)
-                1 -> DownloadsScreen(items, vm::delete)
+                0 -> HomeScreen(sharedLink, active, vm::enqueue)
+                1 -> DownloadsScreen(completed, vm::delete)
                 else -> SettingsScreen(onChooseFolder)
             }
         }

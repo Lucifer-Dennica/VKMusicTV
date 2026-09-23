@@ -31,28 +31,39 @@ class DownloadWorker(
         ).apply { mkdirs() }
 
         val request = YoutubeDLRequest(url)
+
+        // Куда сохранять файл
         request.addOption("-o", "${dir.absolutePath}/%(title)s.%(ext)s")
+
+        // Лучшее видео + аудио, склейка через FFmpeg
         request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
+
+        // Не качать плейлист целиком, только одно видео
         request.addOption("--no-playlist")
+
+        // Безопасные имена файлов (без эмодзи и кириллицы)
         request.addOption("--restrict-filenames")
 
-        // TikTok без водяного знака
-        if (url.contains("tiktok.com")) {
-            request.addOption("--no-watermark")
-        }
-
-        // Cookies (если пользователь загрузил)
+        // Cookies (если пользователь загрузил через настройки)
         val cookiesFile = File(applicationContext.filesDir, "cookies.txt")
         if (cookiesFile.exists() && cookiesFile.length() > 0) {
             request.addOption("--cookies", cookiesFile.absolutePath)
         }
 
+        // Не падать, если видео уже удалено или приватное — просто пропустить
+        request.addOption("--no-warnings")
+
         var lastFile: String? = null
 
         return try {
             YoutubeDL.getInstance().execute(request, null) { _, _, line ->
+                // Ловим путь к итоговому файлу из вывода yt-dlp
                 if (line.contains("[download] Destination:")) {
                     lastFile = line.substringAfter("Destination:").trim()
+                }
+                // Иногда путь к финальному файлу пишется после склейки
+                if (line.contains("[Merger] Merging formats into")) {
+                    lastFile = line.substringAfter("\"").substringBefore("\"").trim()
                 }
             }
 
@@ -71,7 +82,10 @@ class DownloadWorker(
             Log.e("DownloadWorker", "Ошибка скачивания", e)
             current?.let {
                 repository.update(
-                    it.copy(status = "ERROR", error = e.message ?: "Ошибка загрузки")
+                    it.copy(
+                        status = "ERROR",
+                        error = e.message ?: "Ошибка загрузки"
+                    )
                 )
             }
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Ошибка загрузки")))

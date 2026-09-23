@@ -18,6 +18,8 @@ class DownloadRepository(context: Context) {
     suspend fun add(url: String, title: String) =
         dao.insert(DownloadEntity(url = url, title = title))
 
+    suspend fun getById(id: Long) = dao.getById(id)
+
     suspend fun update(item: DownloadEntity) = dao.update(item)
     suspend fun delete(item: DownloadEntity) = dao.delete(item)
 }

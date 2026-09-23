@@ -12,8 +12,8 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
+import com.example.videodownloader.data.local.DownloadEntity
 import com.example.videodownloader.data.repository.DownloadRepository
-import kotlinx.coroutines.flow.first
 import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
@@ -30,8 +30,12 @@ class DownloadWorker(
         val id = inputData.getLong(KEY_ID, 0L)
 
         val repository = DownloadRepository(applicationContext)
-        val current = repository.items.first().firstOrNull { it.id == id }
-        current?.let { repository.update(it.copy(status = "DOWNLOADING", progress = 0)) }
+
+        // Берём запись напрямую из БД, чтобы не было гонки с Flow
+        val current = repository.getById(id)
+        if (current != null) {
+            repository.update(current.copy(status = "DOWNLOADING", progress = 0))
+        }
 
         showNotification(id, "Скачивание…", 0, ongoing = true)
 
@@ -39,18 +43,18 @@ class DownloadWorker(
             val resolved = resolveDirectUrl(url)
                 ?: throw Exception("Не удалось получить ссылку на видео")
 
-            current?.let {
+            repository.getById(id)?.let {
                 repository.update(it.copy(thumbnailUrl = resolved.thumbnail, progress = 5))
             }
 
             val tempFile = File(applicationContext.cacheDir, "video_$id.mp4")
-            downloadFile(resolved.videoUrl, tempFile, id, repository, current)
+            downloadFile(resolved.videoUrl, tempFile, id, repository)
 
             val fileName = "video_${id}_${System.currentTimeMillis()}.mp4"
             val savedPath = saveToPublicDcim(tempFile, fileName)
             tempFile.delete()
 
-            current?.let {
+            repository.getById(id)?.let {
                 repository.update(it.copy(
                     filePath = savedPath,
                     status = "COMPLETED",
@@ -59,10 +63,12 @@ class DownloadWorker(
                 ))
             }
             showNotification(id, "✅ Видео скачано", 100, ongoing = false)
+            // Через 3 сек уведомление исчезнет
+            cancelNotificationDelayed(id)
             Result.success(workDataOf(KEY_FILE to savedPath))
         } catch (e: Exception) {
             Log.e("DownloadWorker", "Ошибка", e)
-            current?.let {
+            repository.getById(id)?.let {
                 repository.update(it.copy(status = "ERROR", error = e.message))
             }
             showNotification(id, "❌ Ошибка: ${e.message}", 0, ongoing = false)
@@ -72,12 +78,10 @@ class DownloadWorker(
 
     data class Resolved(val videoUrl: String, val thumbnail: String?)
 
-    private fun resolveDirectUrl(url: String): Resolved? {
-        return when {
-            url.contains("tiktok.com") -> resolveTikTok(url)
-            url.contains("instagram.com") -> resolveInstagram(url)
-            else -> resolveCobalt(url)
-        }
+    private fun resolveDirectUrl(url: String): Resolved? = when {
+        url.contains("tiktok.com") -> resolveTikTok(url)
+        url.contains("instagram.com") -> resolveInstagram(url)
+        else -> resolveCobalt(url)
     }
 
     private fun resolveTikTok(url: String): Resolved? {
@@ -91,12 +95,10 @@ class DownloadWorker(
         return Resolved(video, cover)
     }
 
-    private fun resolveInstagram(url: String): Resolved? {
-        return try {
-            resolveCobalt(url)
-        } catch (e: Exception) {
-            throw Exception("Instagram требует авторизации. Настройки → Как скачать из Instagram.")
-        }
+    private fun resolveInstagram(url: String): Resolved? = try {
+        resolveCobalt(url)
+    } catch (e: Exception) {
+        throw Exception("Instagram требует авторизации. Настройки → Как скачать из Instagram.")
     }
 
     private fun resolveCobalt(url: String): Resolved? {
@@ -146,8 +148,7 @@ class DownloadWorker(
         url: String,
         outFile: File,
         id: Long,
-        repository: DownloadRepository,
-        current: com.example.videodownloader.data.local.DownloadEntity?
+        repository: DownloadRepository
     ) {
         val conn = (URL(url).openConnection() as HttpURLConnection).apply {
             connectTimeout = 20_000
@@ -170,7 +171,9 @@ class DownloadWorker(
                         done += read
                         if (total > 0) {
                             val percent = 5 + ((done * 90) / total).toInt()
-                            current?.let { repository.update(it.copy(progress = percent)) }
+                            repository.getById(id)?.let {
+                                repository.update(it.copy(progress = percent))
+                            }
                             if (percent - lastNotified >= 10) {
                                 lastNotified = percent
                                 showNotification(id, "Скачивание… $percent%", percent, ongoing = true)
@@ -230,6 +233,14 @@ class DownloadWorker(
             .setAutoCancel(!ongoing)
             .build()
         manager.notify(id.toInt(), notif)
+    }
+
+    /** Отменяет уведомление через 3 секунды после завершения. */
+    private fun cancelNotificationDelayed(id: Long) {
+        val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            manager.cancel(id.toInt())
+        }, 3000)
     }
 
     companion object {

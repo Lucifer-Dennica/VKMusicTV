@@ -9,7 +9,9 @@ import com.example.videodownloader.data.repository.DownloadRepository
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import java.io.File
+import java.util.concurrent.atomic.AtomicInteger
 
 class DownloadWorker(
     appContext: Context,
@@ -31,41 +33,43 @@ class DownloadWorker(
         ).apply { mkdirs() }
 
         val request = YoutubeDLRequest(url)
-
-        // Куда сохранять
         request.addOption("-o", "${dir.absolutePath}/%(title)s.%(ext)s")
-
-        // Формат: лучшее видео + аудио, склейка через FFmpeg
         request.addOption("-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best")
-
-        // Отключаем плейлисты (качаем только одно видео)
         request.addOption("--no-playlist")
-
-        // Безопасные имена файлов
         request.addOption("--restrict-filenames")
 
-        // TikTok — без водяного знака
         if (url.contains("tiktok.com")) {
             request.addOption("--no-watermark")
         }
 
-        // Cookies.txt (если пользователь загрузил)
         val cookiesFile = File(applicationContext.filesDir, "cookies.txt")
         if (cookiesFile.exists() && cookiesFile.length() > 0) {
             request.addOption("--cookies", cookiesFile.absolutePath)
         }
 
-        return try {
-            var lastFile: String? = null
-
-            YoutubeDL.getInstance().execute(request, null) { progress, _, line ->
+        // Прогресс из callback'а пишем в атомарный int, а suspend-функцию setProgress
+        // вызываем в отдельной корутине — иначе компилятор ругается.
+        val progress = AtomicInteger(0)
+        val progressJob = launch {
+            while (true) {
                 try {
-                    setProgress(workDataOf(KEY_PROGRESS to progress.toInt()))
+                    setProgress(workDataOf(KEY_PROGRESS to progress.get()))
                 } catch (_: Exception) {}
+                kotlinx.coroutines.delay(500)
+            }
+        }
+
+        var lastFile: String? = null
+
+        return try {
+            YoutubeDL.getInstance().execute(request, null) { p, _, line ->
+                progress.set(p.toInt())
                 if (line.contains("[download] Destination:")) {
                     lastFile = line.substringAfter("Destination:").trim()
                 }
             }
+
+            progressJob.cancel()
 
             current?.let {
                 repository.update(
@@ -79,13 +83,11 @@ class DownloadWorker(
             }
             Result.success(workDataOf(KEY_FILE to (lastFile ?: dir.absolutePath)))
         } catch (e: Exception) {
+            progressJob.cancel()
             Log.e("DownloadWorker", "Ошибка скачивания", e)
             current?.let {
                 repository.update(
-                    it.copy(
-                        status = "ERROR",
-                        error = e.message ?: "Ошибка загрузки"
-                    )
+                    it.copy(status = "ERROR", error = e.message ?: "Ошибка загрузки")
                 )
             }
             Result.failure(workDataOf(KEY_ERROR to (e.message ?: "Ошибка загрузки")))

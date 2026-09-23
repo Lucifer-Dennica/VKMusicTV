@@ -4,4 +4,14 @@ import androidx.room.Entity
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "downloads")
-data class DownloadEntity(@PrimaryKey(autoGenerate = true) val id: Long = 0, val url: String, val title: String, val filePath: String? = null, val status: String = "QUEUED", val progress: Int = 0, val createdAt: Long = System.currentTimeMillis(), val error: String? = null)
+data class DownloadEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val url: String,
+    val title: String,
+    val thumbnailUrl: String? = null,
+    val filePath: String? = null,
+    val status: String = "QUEUED",
+    val progress: Int = 0,
+    val createdAt: Long = System.currentTimeMillis(),
+    val error: String? = null
+)

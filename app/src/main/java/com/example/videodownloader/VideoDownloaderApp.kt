@@ -3,6 +3,7 @@ package com.example.videodownloader
 import android.app.Application
 import android.util.Log
 import androidx.work.Configuration
+import androidx.work.WorkManager
 import com.yausername.youtubedl_android.YoutubeDL
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -17,11 +18,15 @@ class VideoDownloaderApp : Application(), Configuration.Provider {
 
     override fun onCreate() {
         super.onCreate()
+
+        // Форсируем инициализацию WorkManager сразу при старте,
+        // иначе первая задача может застрять в QUEUED
+        WorkManager.getInstance(this)
+
         try {
             YoutubeDL.getInstance().init(this)
             Log.d("VideoDownloader", "YoutubeDL инициализирован")
 
-            // Обновляем yt-dlp в фоне — TikTok/YouTube часто меняют API
             CoroutineScope(Dispatchers.IO).launch {
                 try {
                     YoutubeDL.getInstance().updateYoutubeDL(this@VideoDownloaderApp)

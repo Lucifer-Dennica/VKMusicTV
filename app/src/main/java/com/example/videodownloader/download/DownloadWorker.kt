@@ -9,9 +9,7 @@ import com.example.videodownloader.data.repository.DownloadRepository
 import com.yausername.youtubedl_android.YoutubeDL
 import com.yausername.youtubedl_android.YoutubeDLRequest
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import java.io.File
-import java.util.concurrent.atomic.AtomicInteger
 
 class DownloadWorker(
     appContext: Context,
@@ -38,38 +36,25 @@ class DownloadWorker(
         request.addOption("--no-playlist")
         request.addOption("--restrict-filenames")
 
+        // TikTok без водяного знака
         if (url.contains("tiktok.com")) {
             request.addOption("--no-watermark")
         }
 
+        // Cookies (если пользователь загрузил)
         val cookiesFile = File(applicationContext.filesDir, "cookies.txt")
         if (cookiesFile.exists() && cookiesFile.length() > 0) {
             request.addOption("--cookies", cookiesFile.absolutePath)
         }
 
-        // Прогресс из callback'а пишем в атомарный int, а suspend-функцию setProgress
-        // вызываем в отдельной корутине — иначе компилятор ругается.
-        val progress = AtomicInteger(0)
-        val progressJob = launch {
-            while (true) {
-                try {
-                    setProgress(workDataOf(KEY_PROGRESS to progress.get()))
-                } catch (_: Exception) {}
-                kotlinx.coroutines.delay(500)
-            }
-        }
-
         var lastFile: String? = null
 
         return try {
-            YoutubeDL.getInstance().execute(request, null) { p, _, line ->
-                progress.set(p.toInt())
+            YoutubeDL.getInstance().execute(request, null) { _, _, line ->
                 if (line.contains("[download] Destination:")) {
                     lastFile = line.substringAfter("Destination:").trim()
                 }
             }
-
-            progressJob.cancel()
 
             current?.let {
                 repository.update(
@@ -83,7 +68,6 @@ class DownloadWorker(
             }
             Result.success(workDataOf(KEY_FILE to (lastFile ?: dir.absolutePath)))
         } catch (e: Exception) {
-            progressJob.cancel()
             Log.e("DownloadWorker", "Ошибка скачивания", e)
             current?.let {
                 repository.update(

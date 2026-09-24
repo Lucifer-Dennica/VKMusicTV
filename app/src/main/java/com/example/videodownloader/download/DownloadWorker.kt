@@ -74,13 +74,17 @@ class DownloadWorker(
 
     data class Resolved(val videoUrl: String, val thumbnail: String?)
 
-    private fun resolveDirectUrl(url: String): Resolved? = when {
-        url.contains("tiktok.com") -> resolveTikTok(url)
-        url.contains("instagram.com") -> resolveSsave(url) // Instagram тоже через Ssave
-        else -> resolveSsave(url) // YouTube, Facebook, Twitter и др.
+    private fun resolveDirectUrl(url: String): Resolved? {
+        // TikTok — через tikwm (быстрее и стабильнее)
+        // Всё остальное (YouTube, Instagram, Facebook, Twitter, VK и т.д.) — через свой Cobalt
+        return if (url.contains("tiktok.com")) {
+            resolveTikTok(url)
+        } else {
+            resolveCobalt(url)
+        }
     }
 
-    /** TikTok — через tikwm (проверено, работает). */
+    /** TikTok через tikwm. */
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
         val json = httpGetString(api) ?: return null
@@ -92,38 +96,30 @@ class DownloadWorker(
         return Resolved(video, cover)
     }
 
-    /** Универсальный метод через Ssave.cc (бесплатно, без ключа). */
-    private fun resolveSsave(url: String): Resolved? {
-        // Шаг 1: извлекаем метаданные и получаем ссылки на форматы
-        val extractUrl = "https://api.ssave.cc/open/v1/extract"
-        val extractBody = """{"url":"$url"}"""
-        val extractResponse = httpPostJson(extractUrl, extractBody) ?: return null
-        val extractObj = JSONObject(extractResponse)
+    /** Универсальный метод через свой Cobalt. */
+    private fun resolveCobalt(url: String): Resolved? {
+        val body = """{"url":"$url","videoQuality":"720"}"""
+        val response = httpPostJson(COBALT_URL, body) ?: return null
+        val obj = JSONObject(response)
 
         // Проверка на ошибку
-        if (extractObj.has("error")) {
-            throw Exception("Ssave: " + extractObj.optString("error"))
+        val status = obj.optString("status", "")
+        if (status == "error") {
+            val errorObj = obj.optJSONObject("error")
+            val errorMsg = errorObj?.optString("code") ?: obj.optString("error", "unknown")
+            throw Exception("Cobalt: $errorMsg")
         }
 
-        val data = extractObj.optJSONObject("data") ?: return null
-        val formats = data.optJSONArray("formats")
-            ?: throw Exception("Ssave: не найдены форматы")
+        // Новый формат Cobalt: либо "url", либо "picker" с массивом
+        val video = obj.optString("url").ifBlank {
+            val picker = obj.optJSONArray("picker")
+            if (picker != null && picker.length() > 0) {
+                picker.getJSONObject(0).optString("url", "")
+            } else ""
+        }.ifBlank { null } ?: return null
 
-        // Ищем HD-видео
-        var videoUrl: String? = null
-        var thumb: String? = data.optString("thumbnail").ifBlank { null }
-
-        for (i in 0 until formats.length()) {
-            val fmt = formats.getJSONObject(i)
-            val type = fmt.optString("type", "")
-            if (type == "video" || type == "hd") {
-                videoUrl = fmt.optString("url", "").ifBlank { null }
-                if (videoUrl != null) break
-            }
-        }
-
-        videoUrl ?: return null
-        return Resolved(videoUrl, thumb)
+        val thumb = obj.optString("thumbnail").ifBlank { null }
+        return Resolved(video, thumb)
     }
 
     private fun httpGetString(apiUrl: String): String? {
@@ -266,5 +262,8 @@ class DownloadWorker(
         const val KEY_ERROR = "error"
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+
+        // Твой Cobalt на Railway
+        private const val COBALT_URL = "https://cobalt-tools-production-e535.up.railway.app/"
     }
 }

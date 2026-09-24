@@ -76,10 +76,11 @@ class DownloadWorker(
 
     private fun resolveDirectUrl(url: String): Resolved? = when {
         url.contains("tiktok.com") -> resolveTikTok(url)
-        url.contains("instagram.com") -> resolveInstagram(url)
-        else -> resolveCobalt(url)
+        url.contains("instagram.com") -> resolveSsave(url) // Instagram тоже через Ssave
+        else -> resolveSsave(url) // YouTube, Facebook, Twitter и др.
     }
 
+    /** TikTok — через tikwm (проверено, работает). */
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
         val json = httpGetString(api) ?: return null
@@ -91,33 +92,38 @@ class DownloadWorker(
         return Resolved(video, cover)
     }
 
-    private fun resolveInstagram(url: String): Resolved? = try {
-        resolveCobalt(url)
-    } catch (e: Exception) {
-        throw Exception("Instagram требует авторизации. Настройки → Как скачать из Instagram.")
-    }
+    /** Универсальный метод через Ssave.cc (бесплатно, без ключа). */
+    private fun resolveSsave(url: String): Resolved? {
+        // Шаг 1: извлекаем метаданные и получаем ссылки на форматы
+        val extractUrl = "https://api.ssave.cc/open/v1/extract"
+        val extractBody = """{"url":"$url"}"""
+        val extractResponse = httpPostJson(extractUrl, extractBody) ?: return null
+        val extractObj = JSONObject(extractResponse)
 
-    /** Cobalt — новый API (2024+). Старый api.cobalt.tools/api/json больше не работает. */
-    private fun resolveCobalt(url: String): Resolved? {
-        val api = "https://api.cobalt.tools/"
-        val body = """{"url":"$url","videoQuality":"720"}"""
-        val response = httpPostJson(api, body) ?: return null
-        val obj = JSONObject(response)
-        val status = obj.optString("status", "")
-
-        if (status == "error") {
-            throw Exception("Cobalt: " + obj.optString("error", obj.optString("text", "error")))
+        // Проверка на ошибку
+        if (extractObj.has("error")) {
+            throw Exception("Ssave: " + extractObj.optString("error"))
         }
 
-        // Новый формат: либо "url", либо "picker" с массивом ссылок
-        val video = obj.optString("url").ifBlank {
-            val picker = obj.optJSONArray("picker")
-            if (picker != null && picker.length() > 0) {
-                picker.getJSONObject(0).optString("url", "")
-            } else ""
-        }.ifBlank { null } ?: return null
+        val data = extractObj.optJSONObject("data") ?: return null
+        val formats = data.optJSONArray("formats")
+            ?: throw Exception("Ssave: не найдены форматы")
 
-        return Resolved(video, null)
+        // Ищем HD-видео
+        var videoUrl: String? = null
+        var thumb: String? = data.optString("thumbnail").ifBlank { null }
+
+        for (i in 0 until formats.length()) {
+            val fmt = formats.getJSONObject(i)
+            val type = fmt.optString("type", "")
+            if (type == "video" || type == "hd") {
+                videoUrl = fmt.optString("url", "").ifBlank { null }
+                if (videoUrl != null) break
+            }
+        }
+
+        videoUrl ?: return null
+        return Resolved(videoUrl, thumb)
     }
 
     private fun httpGetString(apiUrl: String): String? {

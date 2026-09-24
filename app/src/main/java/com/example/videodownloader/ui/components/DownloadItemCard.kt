@@ -14,7 +14,11 @@ import coil.compose.AsyncImage
 import com.example.videodownloader.data.local.DownloadEntity
 
 @Composable
-fun DownloadItemCard(item: DownloadEntity, onDelete: () -> Unit) {
+fun DownloadItemCard(
+    item: DownloadEntity,
+    onDelete: () -> Unit,
+    onOpen: (DownloadEntity) -> Unit
+) {
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
 
@@ -72,10 +76,15 @@ fun DownloadItemCard(item: DownloadEntity, onDelete: () -> Unit) {
                 }
 
                 Spacer(Modifier.height(4.dp))
-                TextButton(
-                    onClick = onDelete,
-                    modifier = Modifier.align(Alignment.End)
-                ) { Text("Удалить") }
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    if (item.status == "COMPLETED") {
+                        TextButton(onClick = { onOpen(item) }) { Text("Открыть") }
+                    }
+                    TextButton(onClick = onDelete) { Text("Удалить") }
+                }
             }
         }
     }

@@ -28,6 +28,8 @@ class DownloadWorker(
         val url = inputData.getString(KEY_URL) ?: return Result.failure()
         val id = inputData.getLong(KEY_ID, 0L)
 
+        Log.d(TAG, "=== Начало: url=$url id=$id ===")
+
         val repository = DownloadRepository(applicationContext)
         val current = repository.getById(id)
         if (current != null) {
@@ -39,6 +41,8 @@ class DownloadWorker(
         return try {
             val resolved = resolveDirectUrl(url)
                 ?: throw Exception("Не удалось получить ссылку на видео")
+
+            Log.d(TAG, "resolved: video=${resolved.videoUrl.take(80)}..., thumb=${resolved.thumbnail?.take(60)}")
 
             repository.getById(id)?.let {
                 repository.update(it.copy(thumbnailUrl = resolved.thumbnail, progress = 5))
@@ -61,9 +65,10 @@ class DownloadWorker(
             }
             showNotification(id, "✅ Видео скачано", 100, ongoing = false)
             cancelNotificationDelayed(id)
+            Log.d(TAG, "=== Готово: $savedPath ===")
             Result.success(workDataOf(KEY_FILE to savedPath))
         } catch (e: Exception) {
-            Log.e("DownloadWorker", "Ошибка", e)
+            Log.e(TAG, "=== Ошибка ===", e)
             repository.getById(id)?.let {
                 repository.update(it.copy(status = "ERROR", error = e.message))
             }
@@ -76,62 +81,92 @@ class DownloadWorker(
 
     private fun resolveDirectUrl(url: String): Resolved? {
         val lower = url.lowercase()
-        return when {
-            lower.contains("tiktok.com") -> resolveTikTok(url)
-            else -> resolveCobalt(url) // YouTube, Instagram, Facebook и всё остальное
+        return if (lower.contains("tiktok.com")) {
+            Log.d(TAG, "→ TikTok → tikwm")
+            resolveTikTok(url)
+        } else {
+            Log.d(TAG, "→ Не TikTok → Cobalt")
+            resolveCobalt(url)
         }
     }
 
-    // ---------- TikTok ----------
+    // ---------- TikTok через tikwm ----------
 
     private fun resolveTikTok(url: String): Resolved? {
-        // Пробуем tikwm (понимает и полные, и короткие ссылки)
-        try {
-            val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
-            val json = httpGetString(api, timeoutMs = 15_000)
-                ?: throw Exception("tikwm не ответил")
-            val obj = JSONObject(json)
-            if (obj.optInt("code", -1) != 0) {
-                throw Exception("tikwm: " + obj.optString("msg"))
-            }
-            val data = obj.getJSONObject("data")
-            val video = data.optString("play").ifBlank { null }
-                ?: throw Exception("tikwm: нет ссылки на видео")
-            val cover = data.optString("cover").ifBlank { null }
-            return Resolved(video, cover)
-        } catch (e: Exception) {
-            Log.w("DownloadWorker", "tikwm не сработал: ${e.message}")
+        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
+        Log.d(TAG, "GET $api")
+
+        val json = httpGetString(api, timeoutMs = 20_000)
+            ?: throw Exception("tikwm не ответил")
+
+        Log.d(TAG, "tikwm ответ: ${json.take(200)}...")
+
+        val obj = JSONObject(json)
+        val code = obj.optInt("code", -1)
+        if (code != 0) {
+            throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
         }
 
-        // Fallback — Cobalt (тоже понимает TikTok, но нужен рабочий сервер)
-        return resolveCobalt(url)
+        val data = obj.optJSONObject("data")
+            ?: throw Exception("tikwm: нет поля data")
+
+        // Пытаемся взять play, если нет — hdplay
+        val video = data.optString("play").ifBlank { null }
+            ?: data.optString("hdplay").ifBlank { null }
+            ?: throw Exception("tikwm: нет ссылки на видео")
+
+        val cover = data.optString("cover").ifBlank { null }
+
+        Log.d(TAG, "TikTok OK: video=${video.take(60)}..., cover=${cover?.take(60)}")
+        return Resolved(video, cover)
     }
 
-    // ---------- Универсальный Cobalt ----------
+    // ---------- Cobalt через перебор инстансов ----------
 
     private fun resolveCobalt(url: String): Resolved? {
+        val instances = listOf(
+            "https://cobalt-api.kwiatekmiki.com/",
+            "https://co.eepy.today/",
+            "https://cobalt-api.ayo.tf/",
+            "https://cobalt.255x.ru/",
+            "https://api.cobalt.best/",
+            COBALT_URL
+        )
         val body = """{"url":"$url","videoQuality":"720"}"""
-        val response = httpPostJson(COBALT_URL, body, timeoutMs = 20_000)
-            ?: throw Exception("Cobalt не ответил")
-        val obj = JSONObject(response)
-        val status = obj.optString("status", "")
-        if (status == "error") {
-            val errorObj = obj.optJSONObject("error")
-            val errorMsg = errorObj?.optString("code") ?: obj.optString("error", "unknown")
-            throw Exception("Cobalt: $errorMsg")
-        }
-        val video = obj.optString("url").ifBlank {
-            val picker = obj.optJSONArray("picker")
-            if (picker != null && picker.length() > 0) {
-                picker.getJSONObject(0).optString("url", "")
-            } else ""
-        }.ifBlank { null } ?: throw Exception("Cobalt: пустая ссылка")
+        var lastError = "Нет инстансов"
 
-        val thumb = obj.optString("thumbnail").ifBlank { null }
-        return Resolved(video, thumb)
+        for (base in instances) {
+            try {
+                Log.d(TAG, "Cobalt: пробую $base")
+                val response = httpPostJson(base, body, timeoutMs = 15_000) ?: continue
+                val obj = JSONObject(response)
+                val status = obj.optString("status", "")
+                if (status == "error") {
+                    val err = obj.optJSONObject("error")
+                    lastError = err?.optString("code") ?: "unknown"
+                    Log.w(TAG, "Cobalt $base: $lastError")
+                    continue
+                }
+                val video = obj.optString("url").ifBlank {
+                    val picker = obj.optJSONArray("picker")
+                    if (picker != null && picker.length() > 0) {
+                        picker.getJSONObject(0).optString("url", "")
+                    } else ""
+                }.ifBlank { null } ?: continue
+
+                val thumb = obj.optString("thumbnail").ifBlank { null }
+                Log.d(TAG, "Cobalt OK через $base")
+                return Resolved(video, thumb)
+            } catch (e: Exception) {
+                lastError = e.message ?: "unknown"
+                Log.w(TAG, "Cobalt $base: $lastError")
+            }
+        }
+
+        throw Exception("Все Cobalt-инстансы недоступны ($lastError)")
     }
 
-    // ---------- HTTP с таймаутами ----------
+    // ---------- HTTP ----------
 
     private fun httpGetString(apiUrl: String, timeoutMs: Int = 20_000): String? {
         val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
@@ -141,7 +176,8 @@ class DownloadWorker(
             setRequestProperty("User-Agent", USER_AGENT)
         }
         return try {
-            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            val code = conn.responseCode
+            if (code !in 200..299) throw Exception("HTTP $code")
             conn.inputStream.bufferedReader().readText()
         } finally { conn.disconnect() }
     }
@@ -161,7 +197,7 @@ class DownloadWorker(
             val code = conn.responseCode
             if (code !in 200..299) {
                 val errText = conn.errorStream?.bufferedReader()?.readText().orEmpty()
-                throw Exception("HTTP $code: $errText")
+                throw Exception("HTTP $code: ${errText.take(200)}")
             }
             conn.inputStream.bufferedReader().readText()
         } finally { conn.disconnect() }
@@ -184,7 +220,6 @@ class DownloadWorker(
             val total = conn.contentLengthLong
             var done = 0L
             var lastNotified = 0
-
             conn.inputStream.use { input ->
                 outFile.outputStream().use { output ->
                     val buffer = ByteArray(64 * 1024)
@@ -264,6 +299,7 @@ class DownloadWorker(
     }
 
     companion object {
+        private const val TAG = "DownloadWorker"
         const val KEY_URL = "url"
         const val KEY_ID = "id"
         const val KEY_PROGRESS = "progress"

@@ -17,7 +17,6 @@ import org.json.JSONObject
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 
 class DownloadWorker(
     appContext: Context,
@@ -74,51 +73,13 @@ class DownloadWorker(
 
     data class Resolved(val videoUrl: String, val thumbnail: String?)
 
-    private fun resolveDirectUrl(url: String): Resolved? {
-        // TikTok — через tikwm (быстрее и стабильнее)
-        // Всё остальное (YouTube, Instagram, Facebook, Twitter, VK и т.д.) — через свой Cobalt
-        return if (url.contains("tiktok.com")) {
-            resolveTikTok(url)
-        } else {
-            resolveCobalt(url)
-        }
-    }
+    /**
+     * Всё идёт через Cobalt — он умеет TikTok (включая короткие ссылки),
+     * YouTube, Instagram, Facebook, Twitter, VK и десятки других сервисов.
+     */
+    private fun resolveDirectUrl(url: String): Resolved? = resolveCobalt(url)
 
-        /** TikTok через tikwm — сначала разворачиваем короткую ссылку. */
-    private fun resolveTikTok(url: String): Resolved? {
-        // Разворачиваем короткие ссылки (vm.tiktok.com, vt.tiktok.com) в полные
-        val fullUrl = expandUrl(url)
-
-        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(fullUrl, "UTF-8")
-        val json = httpGetString(api) ?: return null
-        val obj = JSONObject(json)
-        if (obj.optInt("code", -1) != 0) throw Exception("tikwm: " + obj.optString("msg"))
-        val data = obj.getJSONObject("data")
-        val video = data.optString("play").ifBlank { null } ?: return null
-        val cover = data.optString("cover").ifBlank { null }
-        return Resolved(video, cover)
-    }
-
-    /** Разворачивает короткую ссылку, следуя HTTP-редиректам. */
-    private fun expandUrl(shortUrl: String): String {
-        return try {
-            val conn = (URL(shortUrl).openConnection() as HttpURLConnection).apply {
-                instanceFollowRedirects = true
-                connectTimeout = 15_000
-                readTimeout = 15_000
-                setRequestProperty("User-Agent", USER_AGENT)
-            }
-            conn.connect()
-            val finalUrl = conn.url.toString()
-            conn.disconnect()
-            finalUrl
-        } catch (e: Exception) {
-            Log.w("DownloadWorker", "Не удалось развернуть $shortUrl: ${e.message}")
-            shortUrl
-        }
-    }
-
-    /** Универсальный метод через свой Cobalt. */
+    /** Универсальный метод через свой Cobalt на Railway. */
     private fun resolveCobalt(url: String): Resolved? {
         val body = """{"url":"$url","videoQuality":"720"}"""
         val response = httpPostJson(COBALT_URL, body) ?: return null
@@ -142,19 +103,6 @@ class DownloadWorker(
 
         val thumb = obj.optString("thumbnail").ifBlank { null }
         return Resolved(video, thumb)
-    }
-
-    private fun httpGetString(apiUrl: String): String? {
-        val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 20_000
-            readTimeout = 30_000
-            setRequestProperty("User-Agent", USER_AGENT)
-        }
-        return try {
-            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
-            conn.inputStream.bufferedReader().readText()
-        } finally { conn.disconnect() }
     }
 
     private fun httpPostJson(apiUrl: String, body: String): String? {

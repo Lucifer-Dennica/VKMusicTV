@@ -22,14 +22,27 @@ fun DownloadsScreen(
 ) {
     val context = LocalContext.current
 
-    Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Text("Мои видео", style = MaterialTheme.typography.headlineMedium)
-        Spacer(Modifier.height(12.dp))
+    Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
+        Text(
+            "Мои видео",
+            style = MaterialTheme.typography.headlineMedium,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
 
         if (items.isEmpty()) {
-            Text("Здесь появятся скачанные видео.")
+            Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                Column(horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally) {
+                    Text("📭", style = MaterialTheme.typography.displayMedium)
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        "Здесь появятся скачанные видео",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
         } else {
-            LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            LazyColumn(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 items(items, key = { it.id }) { item ->
                     DownloadItemCard(
                         item = item,

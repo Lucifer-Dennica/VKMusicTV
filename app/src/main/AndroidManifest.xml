@@ -13,6 +13,8 @@
         android:name=".VideoDownloaderApp"
         android:theme="@style/Theme.VideoDownloader"
         android:label="VideoDownloader"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher"
         android:usesCleartextTraffic="false"
         android:requestLegacyExternalStorage="true">
 

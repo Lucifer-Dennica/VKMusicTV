@@ -5,6 +5,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.example.videodownloader.data.local.DownloadEntity
@@ -15,7 +16,8 @@ import com.example.videodownloader.util.UrlParser
 fun HomeScreen(
     initialLink: String,
     activeItems: List<DownloadEntity>,
-    onDownload: (String) -> Unit
+    onDownload: (String) -> Unit,
+    onDelete: (DownloadEntity) -> Unit
 ) {
     var link by remember(initialLink) { mutableStateOf(initialLink) }
     val parsed = UrlParser.parse(link)
@@ -49,7 +51,7 @@ fun HomeScreen(
             Text("Активные загрузки", style = MaterialTheme.typography.titleMedium)
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(activeItems, key = { it.id }) { item ->
-                    ActiveDownloadCard(item)
+                    ActiveDownloadCard(item) { onDelete(item) }
                 }
             }
         }
@@ -57,16 +59,34 @@ fun HomeScreen(
 }
 
 @Composable
-private fun ActiveDownloadCard(item: DownloadEntity) {
+private fun ActiveDownloadCard(item: DownloadEntity, onDelete: () -> Unit) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
-            Text(item.title, style = MaterialTheme.typography.titleSmall)
+            Row(
+                Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    item.title,
+                    style = MaterialTheme.typography.titleSmall,
+                    modifier = Modifier.weight(1f)
+                )
+                TextButton(onClick = onDelete) { Text("Отмена") }
+            }
             Spacer(Modifier.height(4.dp))
 
             when (item.status) {
-                "QUEUED" -> Text("⏳ В очереди", style = MaterialTheme.typography.bodySmall)
+                "QUEUED" -> {
+                    Text("⏳ В очереди", style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(4.dp))
+                    LinearProgressIndicator(
+                        modifier = Modifier.fillMaxWidth(),
+                        color = MaterialTheme.colorScheme.secondary
+                    )
+                }
                 "DOWNLOADING" -> {
-                    Text("⬇️ ${item.progress}%", style = MaterialTheme.typography.bodySmall)
+                    Text("⬇️ Скачивание ${item.progress}%",
+                        style = MaterialTheme.typography.bodySmall)
                     Spacer(Modifier.height(4.dp))
                     LinearProgressIndicator(
                         progress = { item.progress / 100f },

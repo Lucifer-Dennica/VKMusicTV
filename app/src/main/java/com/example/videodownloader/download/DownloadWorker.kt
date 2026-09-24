@@ -12,7 +12,6 @@ import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import androidx.work.workDataOf
-import com.example.videodownloader.data.local.DownloadEntity
 import com.example.videodownloader.data.repository.DownloadRepository
 import org.json.JSONObject
 import java.io.File
@@ -30,8 +29,6 @@ class DownloadWorker(
         val id = inputData.getLong(KEY_ID, 0L)
 
         val repository = DownloadRepository(applicationContext)
-
-        // Берём запись напрямую из БД, чтобы не было гонки с Flow
         val current = repository.getById(id)
         if (current != null) {
             repository.update(current.copy(status = "DOWNLOADING", progress = 0))
@@ -63,7 +60,6 @@ class DownloadWorker(
                 ))
             }
             showNotification(id, "✅ Видео скачано", 100, ongoing = false)
-            // Через 3 сек уведомление исчезнет
             cancelNotificationDelayed(id)
             Result.success(workDataOf(KEY_FILE to savedPath))
         } catch (e: Exception) {
@@ -101,17 +97,27 @@ class DownloadWorker(
         throw Exception("Instagram требует авторизации. Настройки → Как скачать из Instagram.")
     }
 
+    /** Cobalt — новый API (2024+). Старый api.cobalt.tools/api/json больше не работает. */
     private fun resolveCobalt(url: String): Resolved? {
-        val api = "https://api.cobalt.tools/api/json"
-        val body = """{"url":"$url","vQuality":"720","isAudioOnly":false}"""
+        val api = "https://api.cobalt.tools/"
+        val body = """{"url":"$url","videoQuality":"720"}"""
         val response = httpPostJson(api, body) ?: return null
         val obj = JSONObject(response)
-        if (obj.optString("status") == "error") {
-            throw Exception("Cobalt: " + obj.optString("text", "error"))
+        val status = obj.optString("status", "")
+
+        if (status == "error") {
+            throw Exception("Cobalt: " + obj.optString("error", obj.optString("text", "error")))
         }
-        val video = obj.optString("url").ifBlank { null } ?: return null
-        val thumb = obj.optString("thumbnail").ifBlank { null }
-        return Resolved(video, thumb)
+
+        // Новый формат: либо "url", либо "picker" с массивом ссылок
+        val video = obj.optString("url").ifBlank {
+            val picker = obj.optJSONArray("picker")
+            if (picker != null && picker.length() > 0) {
+                picker.getJSONObject(0).optString("url", "")
+            } else ""
+        }.ifBlank { null } ?: return null
+
+        return Resolved(video, null)
     }
 
     private fun httpGetString(apiUrl: String): String? {
@@ -139,7 +145,11 @@ class DownloadWorker(
         }
         return try {
             conn.outputStream.use { it.write(body.toByteArray()) }
-            if (conn.responseCode !in 200..299) throw Exception("HTTP ${conn.responseCode}")
+            val code = conn.responseCode
+            if (code !in 200..299) {
+                val errText = conn.errorStream?.bufferedReader()?.readText().orEmpty()
+                throw Exception("HTTP $code: $errText")
+            }
             conn.inputStream.bufferedReader().readText()
         } finally { conn.disconnect() }
     }
@@ -235,7 +245,6 @@ class DownloadWorker(
         manager.notify(id.toInt(), notif)
     }
 
-    /** Отменяет уведомление через 3 секунды после завершения. */
     private fun cancelNotificationDelayed(id: Long) {
         val manager = applicationContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({

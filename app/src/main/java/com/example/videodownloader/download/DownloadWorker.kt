@@ -84,9 +84,12 @@ class DownloadWorker(
         }
     }
 
-    /** TikTok через tikwm. */
+        /** TikTok через tikwm — сначала разворачиваем короткую ссылку. */
     private fun resolveTikTok(url: String): Resolved? {
-        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8")
+        // Разворачиваем короткие ссылки (vm.tiktok.com, vt.tiktok.com) в полные
+        val fullUrl = expandUrl(url)
+
+        val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(fullUrl, "UTF-8")
         val json = httpGetString(api) ?: return null
         val obj = JSONObject(json)
         if (obj.optInt("code", -1) != 0) throw Exception("tikwm: " + obj.optString("msg"))
@@ -94,6 +97,25 @@ class DownloadWorker(
         val video = data.optString("play").ifBlank { null } ?: return null
         val cover = data.optString("cover").ifBlank { null }
         return Resolved(video, cover)
+    }
+
+    /** Разворачивает короткую ссылку, следуя HTTP-редиректам. */
+    private fun expandUrl(shortUrl: String): String {
+        return try {
+            val conn = (URL(shortUrl).openConnection() as HttpURLConnection).apply {
+                instanceFollowRedirects = true
+                connectTimeout = 15_000
+                readTimeout = 15_000
+                setRequestProperty("User-Agent", USER_AGENT)
+            }
+            conn.connect()
+            val finalUrl = conn.url.toString()
+            conn.disconnect()
+            finalUrl
+        } catch (e: Exception) {
+            Log.w("DownloadWorker", "Не удалось развернуть $shortUrl: ${e.message}")
+            shortUrl
+        }
     }
 
     /** Универсальный метод через свой Cobalt. */

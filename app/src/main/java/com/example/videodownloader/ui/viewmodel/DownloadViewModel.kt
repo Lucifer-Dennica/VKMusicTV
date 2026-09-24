@@ -27,12 +27,12 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         emptyList()
     )
 
-    /** Только активные задачи — для отображения на главной. */
     val activeItems = repo.items
-        .map { list -> list.filter { it.status == "QUEUED" || it.status == "DOWNLOADING" || it.status == "ERROR" } }
+        .map { list -> list.filter {
+            it.status == "QUEUED" || it.status == "DOWNLOADING" || it.status == "ERROR"
+        } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
-    /** Только завершённые — для экрана «Загрузки». */
     val completedItems = repo.items
         .map { list -> list.filter { it.status == "COMPLETED" } }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
@@ -58,7 +58,12 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Удаление записи (и отмена задачи, если она ещё активна). */
     fun delete(item: DownloadEntity) = viewModelScope.launch {
+        try {
+            WorkManager.getInstance(getApplication())
+                .cancelAllWorkByTag(item.id.toString())
+        } catch (_: Exception) { }
         repo.delete(item)
     }
 }

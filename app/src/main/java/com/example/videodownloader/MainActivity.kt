@@ -78,7 +78,7 @@ private fun VideoDownloaderRoot(
     ) { pad ->
         Box(Modifier.padding(pad)) {
             when (tab) {
-                0 -> HomeScreen(sharedLink, active, vm::enqueue)
+                0 -> HomeScreen(sharedLink, active, vm::enqueue, vm::delete)
                 1 -> DownloadsScreen(completed, vm::delete)
                 else -> SettingsScreen(onChooseFolder)
             }

@@ -1,5 +1,6 @@
 package com.example.videodownloader.data.local
 
+import android.content.Context
 import androidx.room.*
 import kotlinx.coroutines.flow.Flow
 
@@ -26,9 +27,20 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun downloads(): DownloadDao
 
     companion object {
-        fun create(app: android.content.Context) =
-            Room.databaseBuilder(app, AppDatabase::class.java, "downloads.db")
-                .fallbackToDestructiveMigration()
-                .build()
+        @Volatile
+        private var INSTANCE: AppDatabase? = null
+
+        fun get(context: Context): AppDatabase {
+            return INSTANCE ?: synchronized(this) {
+                INSTANCE ?: Room.databaseBuilder(
+                    context.applicationContext,
+                    AppDatabase::class.java,
+                    "downloads.db"
+                )
+                    .fallbackToDestructiveMigration()
+                    .build()
+                    .also { INSTANCE = it }
+            }
+        }
     }
 }

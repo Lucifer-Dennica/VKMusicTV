@@ -40,16 +40,6 @@ jobs:
         with:
           gradle-version: '8.10.2'
 
-      - name: Clean Gradle cache (youtubedl-android)
-        run: |
-          rm -rf ~/.gradle/caches/modules-2/files-2.1/io.github.junkfood02 || true
-          rm -rf ~/.gradle/caches/modules-2/files-2.1/com.github.yausername || true
-
-      - name: Show project structure
-        run: |
-          pwd
-          find . -maxdepth 4 -type f | sort
-
       - name: Generate Gradle Wrapper
         run: gradle wrapper --gradle-version 8.10.2
 
@@ -57,16 +47,16 @@ jobs:
         run: chmod +x gradlew
 
       - name: Build debug APK
-        run: ./gradlew :app:assembleDebug --stacktrace --info --no-daemon
+        run: ./gradlew :app:assembleDebug --stacktrace
 
-      - name: Check APK
+      - name: Rename APK
         run: |
-          ls -lh app/build/outputs/apk/debug/
-          test -f app/build/outputs/apk/debug/app-debug.apk
+          mkdir -p release
+          cp app/build/outputs/apk/debug/app-debug.apk release/VideoDownloader-v1.0.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VideoDownloader-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: VideoDownloader-v1.0
+          path: release/VideoDownloader-v1.0.apk
           if-no-files-found: error

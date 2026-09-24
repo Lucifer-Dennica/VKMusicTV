@@ -1,7 +1,6 @@
 package com.example.videodownloader.ui.components
 
 import android.text.format.Formatter
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -23,7 +22,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun DownloadItemCard(
     item: DownloadEntity,
@@ -32,74 +30,75 @@ fun DownloadItemCard(
 ) {
     val context = LocalContext.current
 
-    // Размер файла
     val fileSize = remember(item.filePath) {
         val path = item.filePath ?: return@remember null
         try {
-            if (path.startsWith("content://")) {
-                null
-            } else {
+            if (path.startsWith("content://")) null
+            else {
                 val f = File(path)
                 if (f.exists()) Formatter.formatShortFileSize(context, f.length()) else null
             }
         } catch (e: Exception) { null }
     }
 
-    // Дата скачивания
     val dateText = remember(item.createdAt) {
-        SimpleDateFormat("dd.MM.yyyy, HH:mm", Locale.getDefault()).format(Date(item.createdAt))
+        SimpleDateFormat("dd.MM.yyyy HH:mm", Locale.getDefault()).format(Date(item.createdAt))
     }
 
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(16.dp))
+            .clip(RoundedCornerShape(12.dp))
             .clickable { if (item.status == "COMPLETED") onOpen(item) },
-        shape = RoundedCornerShape(16.dp),
+        shape = RoundedCornerShape(12.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.surfaceVariant
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column {
-            // Обложка во всю ширину 16:9
+        Row(
+            Modifier.padding(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Компактная обложка 100x56 (16:9)
             if (item.thumbnailUrl != null) {
                 AsyncImage(
                     model = item.thumbnailUrl,
                     contentDescription = null,
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .width(100.dp)
                         .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
+                        .clip(RoundedCornerShape(8.dp)),
                     contentScale = ContentScale.Crop
                 )
             } else {
                 Box(
                     modifier = Modifier
-                        .fillMaxWidth()
+                        .width(100.dp)
                         .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp)),
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(MaterialTheme.colorScheme.surface),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("🎬", style = MaterialTheme.typography.displaySmall)
+                    Text("🎬", style = MaterialTheme.typography.titleLarge)
                 }
             }
 
-            Column(Modifier.padding(12.dp)) {
+            Spacer(Modifier.width(12.dp))
+
+            Column(Modifier.weight(1f)) {
                 Text(
                     item.title,
-                    style = MaterialTheme.typography.titleMedium,
+                    style = MaterialTheme.typography.titleSmall,
                     fontWeight = FontWeight.SemiBold,
-                    maxLines = 2,
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+                Spacer(Modifier.height(2.dp))
 
-                Spacer(Modifier.height(6.dp))
-
-                // Строка с датой и размером
                 Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
                         dateText,
@@ -108,51 +107,32 @@ fun DownloadItemCard(
                     )
                     fileSize?.let {
                         Text(
-                            it,
+                            "• $it",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(2.dp))
 
-                // Статус и кнопки
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val statusText = when (item.status) {
-                        "QUEUED" -> "⏳ В очереди"
-                        "DOWNLOADING" -> "⬇️ ${item.progress}%"
-                        "COMPLETED" -> "✅ Готово"
-                        "ERROR" -> "❌ Ошибка"
-                        else -> item.status
-                    }
-                    Text(
-                        statusText,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = when (item.status) {
-                            "COMPLETED" -> MaterialTheme.colorScheme.primary
-                            "ERROR" -> MaterialTheme.colorScheme.error
-                            else -> MaterialTheme.colorScheme.secondary
-                        }
-                    )
-
-                    Row {
-                        if (item.status == "COMPLETED") {
-                            TextButton(onClick = { onOpen(item) }) {
-                                Text("Открыть")
-                            }
-                        }
-                        IconButton(onClick = onDelete) {
-                            Text("🗑", style = MaterialTheme.typography.titleMedium)
-                        }
-                    }
+                val statusText = when (item.status) {
+                    "QUEUED" -> "⏳ В очереди"
+                    "DOWNLOADING" -> "⬇️ ${item.progress}%"
+                    "COMPLETED" -> "✅ Готово"
+                    "ERROR" -> "❌ Ошибка"
+                    else -> item.status
                 }
+                Text(
+                    statusText,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = when (item.status) {
+                        "COMPLETED" -> MaterialTheme.colorScheme.primary
+                        "ERROR" -> MaterialTheme.colorScheme.error
+                        else -> MaterialTheme.colorScheme.secondary
+                    }
+                )
 
-                // Прогресс
                 if (item.status == "DOWNLOADING") {
                     Spacer(Modifier.height(4.dp))
                     LinearProgressIndicator(
@@ -162,16 +142,28 @@ fun DownloadItemCard(
                     )
                 }
 
-                // Ошибка
                 item.error?.let { err ->
-                    Spacer(Modifier.height(6.dp))
+                    Spacer(Modifier.height(4.dp))
                     Text(
                         err,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.error,
-                        maxLines = 4,
+                        maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
+                }
+            }
+
+            Spacer(Modifier.width(4.dp))
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                if (item.status == "COMPLETED") {
+                    IconButton(onClick = { onOpen(item) }) {
+                        Text("▶️", style = MaterialTheme.typography.titleMedium)
+                    }
+                }
+                IconButton(onClick = onDelete) {
+                    Text("🗑", style = MaterialTheme.typography.titleMedium)
                 }
             }
         }

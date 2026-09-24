@@ -18,6 +18,7 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.util.regex.Pattern
 
 class DownloadWorker(
     appContext: Context,
@@ -42,7 +43,7 @@ class DownloadWorker(
             val resolved = resolveDirectUrl(url)
                 ?: throw Exception("Не удалось получить ссылку на видео")
 
-            Log.d(TAG, "resolved: video=${resolved.videoUrl.take(80)}..., thumb=${resolved.thumbnail?.take(60)}")
+            Log.d(TAG, "resolved: ${resolved.videoUrl.take(80)}...")
 
             repository.getById(id)?.let {
                 repository.update(it.copy(thumbnailUrl = resolved.thumbnail, progress = 5))
@@ -81,25 +82,31 @@ class DownloadWorker(
 
     private fun resolveDirectUrl(url: String): Resolved? {
         val lower = url.lowercase()
-        return if (lower.contains("tiktok.com")) {
-            Log.d(TAG, "→ TikTok → tikwm")
-            resolveTikTok(url)
-        } else {
-            Log.d(TAG, "→ Не TikTok → Cobalt")
-            resolveCobalt(url)
+        return when {
+            lower.contains("tiktok.com") -> {
+                Log.d(TAG, "→ TikTok → tikwm")
+                resolveTikTok(url)
+            }
+            lower.contains("youtube.com") || lower.contains("youtu.be") -> {
+                Log.d(TAG, "→ YouTube → Piped")
+                resolveYouTubeViaPiped(url)
+            }
+            else -> {
+                Log.d(TAG, "→ Не TikTok и не YouTube → Cobalt")
+                resolveCobalt(url)
+            }
         }
     }
 
-    // ---------- TikTok через tikwm ----------
-
+    // =========================================================
+    // TikTok — через tikwm. ЛОГИКА НЕ ТРОНУТА, работает как было.
+    // =========================================================
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
         Log.d(TAG, "GET $api")
 
         val json = httpGetString(api, timeoutMs = 20_000)
             ?: throw Exception("tikwm не ответил")
-
-        Log.d(TAG, "tikwm ответ: ${json.take(200)}...")
 
         val obj = JSONObject(json)
         val code = obj.optInt("code", -1)
@@ -110,19 +117,103 @@ class DownloadWorker(
         val data = obj.optJSONObject("data")
             ?: throw Exception("tikwm: нет поля data")
 
-        // Пытаемся взять play, если нет — hdplay
         val video = data.optString("play").ifBlank { null }
             ?: data.optString("hdplay").ifBlank { null }
             ?: throw Exception("tikwm: нет ссылки на видео")
 
         val cover = data.optString("cover").ifBlank { null }
-
-        Log.d(TAG, "TikTok OK: video=${video.take(60)}..., cover=${cover?.take(60)}")
+        Log.d(TAG, "TikTok OK")
         return Resolved(video, cover)
     }
 
-    // ---------- Cobalt через перебор инстансов ----------
+    // =========================================================
+    // YouTube — через публичные Piped API (без cookies)
+    // =========================================================
+    private fun resolveYouTubeViaPiped(url: String): Resolved? {
+        val videoId = extractYouTubeId(url)
+            ?: throw Exception("Не удалось извлечь ID видео")
 
+        val pipedInstances = listOf(
+            "https://pipedapi.kavin.rocks",
+            "https://pipedapi.adminforge.de",
+            "https://api.piped.projectsegfau.lt",
+            "https://pipedapi-libre.kavin.rocks",
+            "https://pipedapi.leptons.xyz",
+            "https://pipedapi.drgns.space"
+        )
+
+        var lastError: String = "Нет доступных инстансов"
+
+        for (baseUrl in pipedInstances) {
+            try {
+                Log.d(TAG, "Piped: пробую $baseUrl")
+                val apiUrl = "$baseUrl/streams/$videoId"
+                val json = httpGetString(apiUrl, timeoutMs = 15_000) ?: continue
+
+                val obj = JSONObject(json)
+                val videoStreams = obj.optJSONArray("videoStreams")
+                    ?: continue
+
+                // Ищем mp4-поток (сначала с аудио, потом любой)
+                var bestUrl: String? = null
+                var fallbackUrl: String? = null
+
+                for (i in 0 until videoStreams.length()) {
+                    val stream = videoStreams.getJSONObject(i)
+                    val mime = stream.optString("mimeType", "")
+                    val vUrl = stream.optString("url", "")
+                    if (vUrl.isBlank()) continue
+                    if (mime.contains("video/mp4")) {
+                        // Поток с аудио и видео
+                        if (stream.optBoolean("videoOnly", false).not()) {
+                            bestUrl = vUrl
+                            break
+                        } else if (fallbackUrl == null) {
+                            fallbackUrl = vUrl
+                        }
+                    }
+                }
+
+                val videoUrl = bestUrl ?: fallbackUrl
+                if (videoUrl != null) {
+                    val thumb = obj.optString("thumbnailUrl").ifBlank { null }
+                    Log.d(TAG, "YouTube OK через $baseUrl")
+                    return Resolved(videoUrl, thumb)
+                }
+
+                lastError = "нет mp4-потока"
+            } catch (e: Exception) {
+                lastError = e.message ?: "unknown"
+                Log.w(TAG, "Piped $baseUrl: $lastError")
+            }
+        }
+
+        // Fallback — Cobalt (может вернуть ошибку login, но попробуем)
+        Log.w(TAG, "Piped API не сработали, пробую Cobalt")
+        try {
+            return resolveCobalt(url)
+        } catch (e: Exception) {
+            throw Exception("YouTube недоступен: $lastError")
+        }
+    }
+
+    private fun extractYouTubeId(url: String): String? {
+        val patterns = listOf(
+            "(?<=v=)[a-zA-Z0-9_-]{11}",
+            "(?<=youtu\\.be/)[a-zA-Z0-9_-]{11}",
+            "(?<=shorts/)[a-zA-Z0-9_-]{11}",
+            "(?<=embed/)[a-zA-Z0-9_-]{11}"
+        )
+        for (p in patterns) {
+            val m = Pattern.compile(p).matcher(url)
+            if (m.find()) return m.group()
+        }
+        return null
+    }
+
+    // =========================================================
+    // Cobalt — универсальный (Instagram, Facebook, VK, Twitter и др.)
+    // =========================================================
     private fun resolveCobalt(url: String): Resolved? {
         val instances = listOf(
             "https://cobalt-api.kwiatekmiki.com/",
@@ -163,17 +254,19 @@ class DownloadWorker(
             }
         }
 
-        throw Exception("Все Cobalt-инстансы недоступны ($lastError)")
+        throw Exception("Cobalt: $lastError")
     }
 
-    // ---------- HTTP ----------
-
+    // =========================================================
+    // HTTP
+    // =========================================================
     private fun httpGetString(apiUrl: String, timeoutMs: Int = 20_000): String? {
         val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
             connectTimeout = 10_000
             readTimeout = timeoutMs
             setRequestProperty("User-Agent", USER_AGENT)
+            setRequestProperty("Accept", "application/json")
         }
         return try {
             val code = conn.responseCode

@@ -39,6 +39,10 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
     var showYoutubeHelp by remember { mutableStateOf(false) }
     var isCheckingUpdate by remember { mutableStateOf(false) }
 
+    // Состояние для показа диалогов
+    var showRulesDialog by remember { mutableStateOf(false) }
+    var showSecurityDialog by remember { mutableStateOf(false) }
+
     val cookiesPicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri ->
@@ -73,6 +77,45 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
             onBack = { showYoutubeHelp = false }
         )
         return
+    }
+
+    // Composable-диалоги
+    if (showRulesDialog) {
+        AlertDialog(
+            onDismissRequest = { showRulesDialog = false },
+            title = { Text("Правила использования") },
+            text = {
+                Text(
+                    "Приложение предназначено для личного использования. " +
+                    "Скачивайте только тот контент, на который у вас есть права. " +
+                    "Мы не храним видео на серверах и не передаём данные третьим лицам."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showRulesDialog = false }) {
+                    Text("Понятно")
+                }
+            }
+        )
+    }
+
+    if (showSecurityDialog) {
+        AlertDialog(
+            onDismissRequest = { showSecurityDialog = false },
+            title = { Text("Безопасность") },
+            text = {
+                Text(
+                    "Все данные хранятся только на вашем устройстве. " +
+                    "Приложение не отправляет ссылки на сторонние серверы, " +
+                    "кроме тех, что нужны для скачивания видео."
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showSecurityDialog = false }) {
+                    Text("Понятно")
+                }
+            }
+        )
     }
 
     Column(
@@ -176,34 +219,14 @@ fun SettingsScreen(onChooseFolder: () -> Unit) {
             icon = Icons.Default.Shield,
             title = "Правила использования",
             subtitle = "Скачивайте только свой контент",
-            onClick = {
-                AlertDialog.Builder(context)
-                    .setTitle("Правила использования")
-                    .setMessage(
-                        "Приложение предназначено для личного использования. " +
-                        "Скачивайте только тот контент, на который у вас есть права. " +
-                        "Мы не храним видео на серверах и не передаём данные третьим лицам."
-                    )
-                    .setPositiveButton("Понятно", null)
-                    .show()
-            }
+            onClick = { showRulesDialog = true }
         )
 
         SettingItem(
             icon = Icons.Default.CheckCircle,
             title = "Безопасность",
             subtitle = "Cookies хранятся только на устройстве",
-            onClick = {
-                AlertDialog.Builder(context)
-                    .setTitle("Безопасность")
-                    .setMessage(
-                        "Все данные хранятся только на вашем устройстве. " +
-                        "Приложение не отправляет ссылки на сторонние серверы, " +
-                        "кроме тех, что нужны для скачивания видео."
-                    )
-                    .setPositiveButton("Понятно", null)
-                    .show()
-            }
+            onClick = { showSecurityDialog = true }
         )
 
         Spacer(Modifier.height(32.dp))

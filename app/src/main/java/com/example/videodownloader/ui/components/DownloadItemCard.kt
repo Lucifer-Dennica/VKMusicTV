@@ -62,7 +62,6 @@ fun DownloadItemCard(
             Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Обложка 100x56
             if (item.thumbnailUrl != null) {
                 AsyncImage(
                     model = item.thumbnailUrl,
@@ -88,7 +87,6 @@ fun DownloadItemCard(
 
             Spacer(Modifier.width(12.dp))
 
-            // Информация
             Column(Modifier.weight(1f)) {
                 Text(
                     item.title,
@@ -153,7 +151,6 @@ fun DownloadItemCard(
 
             Spacer(Modifier.width(4.dp))
 
-            // Кнопки в один ряд: 📁 🗑
             if (item.status == "COMPLETED") {
                 IconButton(
                     onClick = { onOpenFolder(item) },

@@ -22,7 +22,6 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
     private val repo = DownloadRepository(app)
 
     init {
-        // Сканируем папку при старте — чтобы вернуть "потерянные" видео
         viewModelScope.launch {
             repo.scanFolder()
         }
@@ -61,6 +60,7 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
                         .build()
                 )
                 .build()
+            // WorkManager сам запускает несколько задач параллельно
             WorkManager.getInstance(getApplication()).enqueue(request)
         }
     }
@@ -73,7 +73,6 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         repo.delete(item)
     }
 
-    /** Принудительное сканирование — вызывается из UI при желании. */
     fun rescanFolder() = viewModelScope.launch {
         repo.scanFolder()
     }

@@ -18,7 +18,6 @@ import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
-import java.util.regex.Pattern
 
 class DownloadWorker(
     appContext: Context,
@@ -88,18 +87,18 @@ class DownloadWorker(
                 resolveTikTok(url)
             }
             lower.contains("youtube.com") || lower.contains("youtu.be") -> {
-                Log.d(TAG, "→ YouTube → Piped")
-                resolveYouTubeViaPiped(url)
+                Log.d(TAG, "→ YouTube → yt-dlp")
+                resolveYouTubeViaYtdlp(url)
             }
             else -> {
-                Log.d(TAG, "→ Не TikTok и не YouTube → Cobalt")
+                Log.d(TAG, "→ Остальное → Cobalt")
                 resolveCobalt(url)
             }
         }
     }
 
     // =========================================================
-    // TikTok — через tikwm. ЛОГИКА НЕ ТРОНУТА, работает как было.
+    // TikTok — через tikwm. ЛОГИКА НЕ ТРОНУТА.
     // =========================================================
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
@@ -127,92 +126,26 @@ class DownloadWorker(
     }
 
     // =========================================================
-    // YouTube — через публичные Piped API (без cookies)
+    // YouTube — через свой yt-dlp сервер на Railway
     // =========================================================
-    private fun resolveYouTubeViaPiped(url: String): Resolved? {
-        val videoId = extractYouTubeId(url)
-            ?: throw Exception("Не удалось извлечь ID видео")
+    private fun resolveYouTubeViaYtdlp(url: String): Resolved? {
+        val body = """{"url":"$url"}"""
+        val response = httpPostJson(YTDLP_URL, body, timeoutMs = 60_000)
+            ?: throw Exception("yt-dlp сервер не ответил")
 
-        val pipedInstances = listOf(
-            "https://pipedapi.kavin.rocks",
-            "https://pipedapi.adminforge.de",
-            "https://api.piped.projectsegfau.lt",
-            "https://pipedapi-libre.kavin.rocks",
-            "https://pipedapi.leptons.xyz",
-            "https://pipedapi.drgns.space"
-        )
-
-        var lastError: String = "Нет доступных инстансов"
-
-        for (baseUrl in pipedInstances) {
-            try {
-                Log.d(TAG, "Piped: пробую $baseUrl")
-                val apiUrl = "$baseUrl/streams/$videoId"
-                val json = httpGetString(apiUrl, timeoutMs = 15_000) ?: continue
-
-                val obj = JSONObject(json)
-                val videoStreams = obj.optJSONArray("videoStreams")
-                    ?: continue
-
-                // Ищем mp4-поток (сначала с аудио, потом любой)
-                var bestUrl: String? = null
-                var fallbackUrl: String? = null
-
-                for (i in 0 until videoStreams.length()) {
-                    val stream = videoStreams.getJSONObject(i)
-                    val mime = stream.optString("mimeType", "")
-                    val vUrl = stream.optString("url", "")
-                    if (vUrl.isBlank()) continue
-                    if (mime.contains("video/mp4")) {
-                        // Поток с аудио и видео
-                        if (stream.optBoolean("videoOnly", false).not()) {
-                            bestUrl = vUrl
-                            break
-                        } else if (fallbackUrl == null) {
-                            fallbackUrl = vUrl
-                        }
-                    }
-                }
-
-                val videoUrl = bestUrl ?: fallbackUrl
-                if (videoUrl != null) {
-                    val thumb = obj.optString("thumbnailUrl").ifBlank { null }
-                    Log.d(TAG, "YouTube OK через $baseUrl")
-                    return Resolved(videoUrl, thumb)
-                }
-
-                lastError = "нет mp4-потока"
-            } catch (e: Exception) {
-                lastError = e.message ?: "unknown"
-                Log.w(TAG, "Piped $baseUrl: $lastError")
-            }
+        val obj = JSONObject(response)
+        if (obj.has("detail")) {
+            throw Exception("yt-dlp: " + obj.optString("detail"))
         }
-
-        // Fallback — Cobalt (может вернуть ошибку login, но попробуем)
-        Log.w(TAG, "Piped API не сработали, пробую Cobalt")
-        try {
-            return resolveCobalt(url)
-        } catch (e: Exception) {
-            throw Exception("YouTube недоступен: $lastError")
-        }
-    }
-
-    private fun extractYouTubeId(url: String): String? {
-        val patterns = listOf(
-            "(?<=v=)[a-zA-Z0-9_-]{11}",
-            "(?<=youtu\\.be/)[a-zA-Z0-9_-]{11}",
-            "(?<=shorts/)[a-zA-Z0-9_-]{11}",
-            "(?<=embed/)[a-zA-Z0-9_-]{11}"
-        )
-        for (p in patterns) {
-            val m = Pattern.compile(p).matcher(url)
-            if (m.find()) return m.group()
-        }
-        return null
+        val video = obj.optString("video_url").ifBlank { null }
+            ?: throw Exception("yt-dlp: нет ссылки")
+        val thumb = obj.optString("thumbnail").ifBlank { null }
+        Log.d(TAG, "YouTube OK через yt-dlp")
+        return Resolved(video, thumb)
     }
 
     // =========================================================
-    // Cobalt — универсальный (Instagram, Facebook, VK, Twitter и др.)
+    // Cobalt — для Instagram, Facebook, VK, Twitter и др.
     // =========================================================
     private fun resolveCobalt(url: String): Resolved? {
         val instances = listOf(
@@ -400,6 +333,11 @@ class DownloadWorker(
         const val KEY_ERROR = "error"
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
+
+        // Твой yt-dlp сервер на Railway
+        private const val YTDLP_URL = "https://ytdlp-server-production-16c0.up.railway.app/api/resolve"
+
+        // Твой Cobalt на Railway (для Instagram, Facebook и др.)
         private const val COBALT_URL = "https://cobalt-tools-production-e535.up.railway.app/"
     }
 }

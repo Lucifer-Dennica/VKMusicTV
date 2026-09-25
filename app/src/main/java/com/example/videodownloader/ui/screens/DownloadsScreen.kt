@@ -101,47 +101,36 @@ private fun openVideo(context: android.content.Context, item: DownloadEntity) {
  * через ExternalStorageProvider.
  */
 private fun openFolder(context: android.content.Context, item: DownloadEntity) {
-    // Определяем сервис
     val service = detectService(item)
-
-    // URI папки: primary:DCIM/VideoDownloader/{service}
-    val encodedPath = android.net.Uri.encode("DCIM/VideoDownloader/$service")
-    val folderUri = Uri.parse(
-        "content://com.android.externalstorage.documents/document/primary%3A$encodedPath"
-    )
-
-    // Вариант 1: файловый менеджер откроет директорию
+    val path = "DCIM/VideoDownloader/$service"
+    
+    // Способ 1: через стандартный файловый менеджер
     val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(folderUri, "vnd.android.document/directory")
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        setDataAndType(Uri.parse("file://${Environment.getExternalStorageDirectory()}/$path"), "resource/folder")
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
-
+    
     try {
         context.startActivity(intent)
         return
     } catch (_: Exception) { }
-
-    // Вариант 2: если никто не обработал — откроем корень VideoDownloader
-    val rootEncoded = android.net.Uri.encode("DCIM/VideoDownloader")
-    val rootUri = Uri.parse(
-        "content://com.android.externalstorage.documents/document/primary%3A$rootEncoded"
-    )
-    val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(rootUri, "vnd.android.document/directory")
+    
+    // Способ 2: через ExternalStorageProvider (для Android 10+)
+    val encodedPath = Uri.encode(path)
+    val folderUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3A$encodedPath")
+    val intent2 = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(folderUri, "vnd.android.document/directory")
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
+    
     try {
-        context.startActivity(fallbackIntent)
+        context.startActivity(intent2)
         return
     } catch (_: Exception) { }
-
-    Toast.makeText(
-        context,
-        "Не удалось открыть папку. Путь: DCIM/VideoDownloader/$service",
-        Toast.LENGTH_LONG
-    ).show()
+    
+    // Способ 3: показать путь пользователю
+    Toast.makeText(context, "Путь: $path", Toast.LENGTH_LONG).show()
 }
 
 private fun detectService(item: DownloadEntity): String {

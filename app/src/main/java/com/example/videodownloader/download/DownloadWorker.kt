@@ -27,8 +27,9 @@ class DownloadWorker(
     override suspend fun doWork(): Result {
         val url = inputData.getString(KEY_URL) ?: return Result.failure()
         val id = inputData.getLong(KEY_ID, 0L)
+        val service = getServiceFolder(url)
 
-        Log.d(TAG, "=== Начало: url=$url id=$id ===")
+        Log.d(TAG, "=== Начало: url=$url id=$id service=$service ===")
 
         val repository = DownloadRepository(applicationContext)
         val current = repository.getById(id)
@@ -52,7 +53,7 @@ class DownloadWorker(
             downloadFile(resolved.videoUrl, tempFile, id, repository)
 
             val fileName = "video_${id}_${System.currentTimeMillis()}.mp4"
-            val savedPath = saveToPublicDcim(tempFile, fileName)
+            val savedPath = saveToPublicDcim(tempFile, fileName, service)
             tempFile.delete()
 
             repository.getById(id)?.let {
@@ -79,69 +80,74 @@ class DownloadWorker(
 
     data class Resolved(val videoUrl: String, val thumbnail: String?)
 
-    private fun resolveDirectUrl(url: String): Resolved? {
+    /** Определяет подпапку по URL. */
+    private fun getServiceFolder(url: String): String {
         val lower = url.lowercase()
         return when {
-            lower.contains("tiktok.com") -> {
-                Log.d(TAG, "→ TikTok → tikwm")
-                resolveTikTok(url)
-            }
-            lower.contains("youtube.com") || lower.contains("youtu.be") -> {
-                Log.d(TAG, "→ YouTube → yt-dlp")
-                resolveViaYtdlp(url)
-            }
-            lower.contains("instagram.com") -> {
-                Log.d(TAG, "→ Instagram → yt-dlp")
-                resolveViaYtdlp(url)
-            }
-            else -> {
-                Log.d(TAG, "→ Остальное → Cobalt")
-                resolveCobalt(url)
-            }
+            lower.contains("tiktok.com") -> "TikTok"
+            lower.contains("youtube.com") || lower.contains("youtu.be") -> "YouTube"
+            lower.contains("instagram.com") -> "Instagram"
+            lower.contains("facebook.com") || lower.contains("fb.watch") -> "Facebook"
+            lower.contains("twitter.com") || lower.contains("x.com") -> "Twitter"
+            lower.contains("vk.com") -> "VK"
+            lower.contains("reddit.com") -> "Reddit"
+            lower.contains("pinterest.com") || lower.contains("pin.it") -> "Pinterest"
+            lower.contains("snapchat.com") -> "Snapchat"
+            else -> "Другое"
         }
     }
 
-    // =========================================================
-    // TikTok — через tikwm. ЛОГИКА НЕ ТРОНУТА.
-    // =========================================================
+    private fun resolveDirectUrl(url: String): Resolved? {
+        val lower = url.lowercase()
+        return when {
+            lower.contains("tiktok.com") -> resolveTikTok(url)
+            lower.contains("youtube.com") || lower.contains("youtu.be") -> resolveViaYtdlp(url)
+            lower.contains("instagram.com") -> resolveViaYtdlp(url)
+            else -> resolveCobalt(url)
+        }
+    }
+
+    // TikTok через tikwm
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
         val json = httpGetString(api, timeoutMs = 20_000)
             ?: throw Exception("tikwm не ответил")
         val obj = JSONObject(json)
-        val code = obj.optInt("code", -1)
-        if (code != 0) throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
-        val data = obj.optJSONObject("data") ?: throw Exception("tikwm: нет поля data")
+        if (obj.optInt("code", -1) != 0)
+            throw Exception("tikwm: ${obj.optString("msg", "unknown")}")
+        val data = obj.optJSONObject("data") ?: throw Exception("tikwm: нет data")
         val video = data.optString("play").ifBlank { null }
             ?: data.optString("hdplay").ifBlank { null }
-            ?: throw Exception("tikwm: нет ссылки на видео")
+            ?: throw Exception("tikwm: нет ссылки")
         val cover = data.optString("cover").ifBlank { null }
-        Log.d(TAG, "TikTok OK")
         return Resolved(video, cover)
     }
 
-    // =========================================================
-    // YouTube + Instagram → через свой yt-dlp сервер (макс. качество)
-    // =========================================================
+    // YouTube / Instagram через свой yt-dlp
     private fun resolveViaYtdlp(url: String): Resolved? {
         val body = """{"url":"$url"}"""
         val response = httpPostJson(YTDLP_URL, body, timeoutMs = 60_000)
             ?: throw Exception("yt-dlp сервер не ответил")
-
         val obj = JSONObject(response)
         if (obj.has("detail")) {
-            throw Exception("yt-dlp: " + obj.optString("detail"))
+            val detail = obj.optString("detail")
+            // Понятное сообщение для пользователя
+            if (detail.contains("Sign in to confirm", ignoreCase = true) ||
+                detail.contains("bot", ignoreCase = true)) {
+                throw Exception("YouTube требует авторизацию. См. Настройки → Как починить YouTube")
+            }
+            if (detail.contains("login", ignoreCase = true)) {
+                throw Exception("Instagram требует авторизацию. См. Настройки → Instagram")
+            }
+            throw Exception("yt-dlp: " + detail.take(150))
         }
         val video = obj.optString("video_url").ifBlank { null }
             ?: throw Exception("yt-dlp: нет ссылки")
         val thumb = obj.optString("thumbnail").ifBlank { null }
-        Log.d(TAG, "OK через yt-dlp")
         return Resolved(video, thumb)
     }
 
-    // =========================================================
-    // Cobalt — для VK, Facebook, Twitter, Reddit и др.
-    // =========================================================
+    // Cobalt для остальных
     private fun resolveCobalt(url: String): Resolved? {
         val instances = listOf(
             "https://cobalt-api.kwiatekmiki.com/",
@@ -151,43 +157,33 @@ class DownloadWorker(
             "https://api.cobalt.best/",
             COBALT_URL
         )
-        // max качество
         val body = """{"url":"$url","videoQuality":"max"}"""
         var lastError = "Нет инстансов"
 
         for (base in instances) {
             try {
-                Log.d(TAG, "Cobalt: пробую $base")
                 val response = httpPostJson(base, body, timeoutMs = 15_000) ?: continue
                 val obj = JSONObject(response)
-                val status = obj.optString("status", "")
-                if (status == "error") {
-                    val err = obj.optJSONObject("error")
-                    lastError = err?.optString("code") ?: "unknown"
-                    Log.w(TAG, "Cobalt $base: $lastError")
+                if (obj.optString("status") == "error") {
+                    lastError = obj.optJSONObject("error")?.optString("code") ?: "unknown"
                     continue
                 }
                 val video = obj.optString("url").ifBlank {
                     val picker = obj.optJSONArray("picker")
-                    if (picker != null && picker.length() > 0) {
+                    if (picker != null && picker.length() > 0)
                         picker.getJSONObject(0).optString("url", "")
-                    } else ""
+                    else ""
                 }.ifBlank { null } ?: continue
-
                 val thumb = obj.optString("thumbnail").ifBlank { null }
                 Log.d(TAG, "Cobalt OK через $base")
                 return Resolved(video, thumb)
             } catch (e: Exception) {
                 lastError = e.message ?: "unknown"
-                Log.w(TAG, "Cobalt $base: $lastError")
             }
         }
         throw Exception("Cobalt: $lastError")
     }
 
-    // =========================================================
-    // HTTP
-    // =========================================================
     private fun httpGetString(apiUrl: String, timeoutMs: Int = 20_000): String? {
         val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"
@@ -264,12 +260,15 @@ class DownloadWorker(
         } finally { conn.disconnect() }
     }
 
-    private fun saveToPublicDcim(tempFile: File, fileName: String): String {
+    /** Сохраняет в DCIM/VideoDownloader/{service}/filename.mp4 */
+    private fun saveToPublicDcim(tempFile: File, fileName: String, service: String): String {
+        val relativePath = Environment.DIRECTORY_DCIM + "/VideoDownloader/" + service + "/"
+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
                 put(MediaStore.Video.Media.DISPLAY_NAME, fileName)
                 put(MediaStore.Video.Media.MIME_TYPE, "video/mp4")
-                put(MediaStore.Video.Media.RELATIVE_PATH, Environment.DIRECTORY_DCIM + "/VideoDownloader")
+                put(MediaStore.Video.Media.RELATIVE_PATH, relativePath)
                 put(MediaStore.Video.Media.IS_PENDING, 1)
             }
             val resolver = applicationContext.contentResolver
@@ -286,7 +285,7 @@ class DownloadWorker(
         } else {
             val dir = File(
                 Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DCIM),
-                "VideoDownloader"
+                "VideoDownloader/$service"
             ).apply { mkdirs() }
             val target = File(dir, fileName)
             tempFile.copyTo(target, overwrite = true)

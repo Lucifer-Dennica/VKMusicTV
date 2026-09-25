@@ -27,7 +27,8 @@ import java.util.Locale
 fun DownloadItemCard(
     item: DownloadEntity,
     onDelete: () -> Unit,
-    onOpen: (DownloadEntity) -> Unit
+    onOpen: (DownloadEntity) -> Unit,
+    onOpenFolder: (DownloadEntity) -> Unit
 ) {
     val context = LocalContext.current
 
@@ -61,7 +62,7 @@ fun DownloadItemCard(
             Modifier.padding(10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Компактная обложка 100x56 (16:9)
+            // Обложка 100x56
             if (item.thumbnailUrl != null) {
                 AsyncImage(
                     model = item.thumbnailUrl,
@@ -96,11 +97,7 @@ fun DownloadItemCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(2.dp))
-
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
                         dateText,
                         style = MaterialTheme.typography.bodySmall,
@@ -114,7 +111,6 @@ fun DownloadItemCard(
                         )
                     }
                 }
-
                 Spacer(Modifier.height(2.dp))
 
                 val statusText = when (item.status) {
@@ -138,8 +134,7 @@ fun DownloadItemCard(
                     Spacer(Modifier.height(4.dp))
                     LinearProgressIndicator(
                         progress = { item.progress / 100f },
-                        modifier = Modifier.fillMaxWidth(),
-                        color = MaterialTheme.colorScheme.primary
+                        modifier = Modifier.fillMaxWidth()
                     )
                 }
 
@@ -161,6 +156,9 @@ fun DownloadItemCard(
                 if (item.status == "COMPLETED") {
                     IconButton(onClick = { onOpen(item) }) {
                         Text("▶️", style = MaterialTheme.typography.titleMedium)
+                    }
+                    IconButton(onClick = { onOpenFolder(item) }) {
+                        Text("📁", style = MaterialTheme.typography.titleMedium)
                     }
                 }
                 IconButton(onClick = onDelete) {

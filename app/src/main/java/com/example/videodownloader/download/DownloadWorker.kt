@@ -88,53 +88,103 @@ class DownloadWorker(
             lower.contains("youtube.com") || lower.contains("youtu.be") -> "YouTube"
             lower.contains("instagram.com") -> "Instagram"
             lower.contains("facebook.com") || lower.contains("fb.watch") -> "Facebook"
-            lower.contains("twitter.com") || lower.contains("x.com") -> "Twitter"
             lower.contains("vk.com") -> "VK"
+            lower.contains("twitter.com") || lower.contains("x.com") -> "Twitter"
             lower.contains("reddit.com") -> "Reddit"
             lower.contains("pinterest.com") || lower.contains("pin.it") -> "Pinterest"
             lower.contains("snapchat.com") -> "Snapchat"
+            lower.contains("vimeo.com") -> "Vimeo"
+            lower.contains("dailymotion.com") -> "Dailymotion"
+            lower.contains("twitch.tv") -> "Twitch"
+            lower.contains("rutube.ru") -> "Rutube"
+            lower.contains("soundcloud.com") -> "SoundCloud"
             else -> "Другое"
         }
     }
 
+    /**
+     * Маршрутизация по источнику:
+     * - TikTok → tikwm (быстрее, стабильнее)
+     * - YouTube, Instagram → свой yt-dlp сервер
+     * - Всё остальное → Cobalt
+     * - Прямые ссылки на файлы → скачиваются как есть
+     */
     private fun resolveDirectUrl(url: String): Resolved? {
         val lower = url.lowercase()
         return when {
+            // TikTok — через tikwm (не трогаем, работает)
             lower.contains("tiktok.com") -> resolveTikTok(url)
+
+            // YouTube и Instagram — через yt-dlp
             lower.contains("youtube.com") || lower.contains("youtu.be") -> resolveViaYtdlp(url)
             lower.contains("instagram.com") -> resolveViaYtdlp(url)
+
+            // Facebook, VK, Twitter, Reddit, Pinterest, Snapchat,
+            // Vimeo, Dailymotion, Twitch, Rutube, SoundCloud и др. — через Cobalt
+            lower.contains("facebook.com") || lower.contains("fb.watch") ||
+            lower.contains("vk.com") || lower.contains("twitter.com") ||
+            lower.contains("x.com") || lower.contains("reddit.com") ||
+            lower.contains("pinterest.com") || lower.contains("pin.it") ||
+            lower.contains("snapchat.com") || lower.contains("vimeo.com") ||
+            lower.contains("dailymotion.com") || lower.contains("twitch.tv") ||
+            lower.contains("rumble.com") || lower.contains("odysee.com") ||
+            lower.contains("soundcloud.com") || lower.contains("rutube.ru") ||
+            lower.contains("linkedin.com") || lower.contains("threads.net") ||
+            lower.contains("tumblr.com") -> resolveCobalt(url)
+
+            // Прямые ссылки на файлы — качаем как есть
+            lower.endsWith(".mp4") || lower.endsWith(".webm") ||
+            lower.endsWith(".mov") || lower.endsWith(".m4v") -> Resolved(url, null)
+
+            // Всё остальное — пробуем через Cobalt
             else -> resolveCobalt(url)
         }
     }
 
-    // TikTok через tikwm
+    // =========================================================
+    // TikTok — через tikwm. ЛОГИКА НЕ ТРОНУТА.
+    // tikwm сам разворачивает короткие ссылки (vm.tiktok.com, vt.tiktok.com),
+    // работает и с полными (www.tiktok.com/@user/video/...).
+    // =========================================================
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
+        Log.d(TAG, "GET $api")
+
         val json = httpGetString(api, timeoutMs = 20_000)
             ?: throw Exception("tikwm не ответил")
+
         val obj = JSONObject(json)
-        if (obj.optInt("code", -1) != 0)
-            throw Exception("tikwm: ${obj.optString("msg", "unknown")}")
-        val data = obj.optJSONObject("data") ?: throw Exception("tikwm: нет data")
+        val code = obj.optInt("code", -1)
+        if (code != 0) {
+            throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
+        }
+
+        val data = obj.optJSONObject("data")
+            ?: throw Exception("tikwm: нет поля data")
+
         val video = data.optString("play").ifBlank { null }
             ?: data.optString("hdplay").ifBlank { null }
-            ?: throw Exception("tikwm: нет ссылки")
+            ?: throw Exception("tikwm: нет ссылки на видео")
+
         val cover = data.optString("cover").ifBlank { null }
+        Log.d(TAG, "TikTok OK")
         return Resolved(video, cover)
     }
 
-    // YouTube / Instagram через свой yt-dlp
+    // =========================================================
+    // YouTube, Instagram — через yt-dlp сервер
+    // =========================================================
     private fun resolveViaYtdlp(url: String): Resolved? {
         val body = """{"url":"$url"}"""
         val response = httpPostJson(YTDLP_URL, body, timeoutMs = 60_000)
             ?: throw Exception("yt-dlp сервер не ответил")
+
         val obj = JSONObject(response)
         if (obj.has("detail")) {
             val detail = obj.optString("detail")
-            // Понятное сообщение для пользователя
             if (detail.contains("Sign in to confirm", ignoreCase = true) ||
-                detail.contains("bot", ignoreCase = true)) {
-                throw Exception("YouTube требует авторизацию. См. Настройки → Как починить YouTube")
+                detail.contains("not a bot", ignoreCase = true)) {
+                throw Exception("YouTube требует авторизацию. См. Настройки → YouTube")
             }
             if (detail.contains("login", ignoreCase = true)) {
                 throw Exception("Instagram требует авторизацию. См. Настройки → Instagram")
@@ -144,10 +194,13 @@ class DownloadWorker(
         val video = obj.optString("video_url").ifBlank { null }
             ?: throw Exception("yt-dlp: нет ссылки")
         val thumb = obj.optString("thumbnail").ifBlank { null }
+        Log.d(TAG, "yt-dlp OK")
         return Resolved(video, thumb)
     }
 
-    // Cobalt для остальных
+    // =========================================================
+    // Cobalt — для всех остальных сервисов
+    // =========================================================
     private fun resolveCobalt(url: String): Resolved? {
         val instances = listOf(
             "https://cobalt-api.kwiatekmiki.com/",
@@ -162,10 +215,13 @@ class DownloadWorker(
 
         for (base in instances) {
             try {
+                Log.d(TAG, "Cobalt: пробую $base")
                 val response = httpPostJson(base, body, timeoutMs = 15_000) ?: continue
                 val obj = JSONObject(response)
                 if (obj.optString("status") == "error") {
-                    lastError = obj.optJSONObject("error")?.optString("code") ?: "unknown"
+                    val err = obj.optJSONObject("error")
+                    lastError = err?.optString("code") ?: "unknown"
+                    Log.w(TAG, "Cobalt $base: $lastError")
                     continue
                 }
                 val video = obj.optString("url").ifBlank {
@@ -174,16 +230,21 @@ class DownloadWorker(
                         picker.getJSONObject(0).optString("url", "")
                     else ""
                 }.ifBlank { null } ?: continue
+
                 val thumb = obj.optString("thumbnail").ifBlank { null }
                 Log.d(TAG, "Cobalt OK через $base")
                 return Resolved(video, thumb)
             } catch (e: Exception) {
                 lastError = e.message ?: "unknown"
+                Log.w(TAG, "Cobalt $base: $lastError")
             }
         }
         throw Exception("Cobalt: $lastError")
     }
 
+    // =========================================================
+    // HTTP
+    // =========================================================
     private fun httpGetString(apiUrl: String, timeoutMs: Int = 20_000): String? {
         val conn = (URL(apiUrl).openConnection() as HttpURLConnection).apply {
             requestMethod = "GET"

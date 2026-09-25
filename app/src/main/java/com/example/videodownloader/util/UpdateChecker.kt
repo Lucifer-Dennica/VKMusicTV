@@ -15,7 +15,7 @@ import java.net.URL
 object UpdateChecker {
 
     // ⚠️ ЗАМЕНИ на свой GitHub-логин и название репозитория
-    private const val GITHUB_REPO = "VKMusicTV/VKMusicTV"
+    private const val GITHUB_REPO = "Lucifer-Dennica/VideoDownloader"
     private const val TAG = "UpdateChecker"
 
     data class UpdateInfo(

@@ -21,6 +21,13 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
 
     private val repo = DownloadRepository(app)
 
+    init {
+        // Сканируем папку при старте — чтобы вернуть "потерянные" видео
+        viewModelScope.launch {
+            repo.scanFolder()
+        }
+    }
+
     val items = repo.items.stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
@@ -58,12 +65,16 @@ class DownloadViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    /** Удаление записи (и отмена задачи, если она ещё активна). */
     fun delete(item: DownloadEntity) = viewModelScope.launch {
         try {
             WorkManager.getInstance(getApplication())
                 .cancelAllWorkByTag(item.id.toString())
         } catch (_: Exception) { }
         repo.delete(item)
+    }
+
+    /** Принудительное сканирование — вызывается из UI при желании. */
+    fun rescanFolder() = viewModelScope.launch {
+        repo.scanFolder()
     }
 }

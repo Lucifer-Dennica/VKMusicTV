@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.videodownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 2          // было 1, стало 2 (инкремент для 1.1)
-        versionName = "1.1.0"    // было "1.0.0"
+        versionCode = 3          // было 2, стало 3 (инкремент для 1.2)
+        versionName = "1.2.0"    // было "1.2.0"
         vectorDrawables { useSupportLibrary = true }
     }
 

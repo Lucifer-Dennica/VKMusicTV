@@ -13,8 +13,8 @@ android {
         applicationId = "com.example.videodownloader"
         minSdk = 24
         targetSdk = 35
-        versionCode = 4          // было 2, стало 3 (инкремент для 1.2)
-        versionName = "1.3.0"    // было "1.2.0"
+        versionCode = 5
+        versionName = "1.4.0"
         vectorDrawables { useSupportLibrary = true }
     }
 
@@ -53,6 +53,7 @@ dependencies {
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
     implementation("androidx.navigation:navigation-compose:2.8.7")
@@ -70,6 +71,5 @@ dependencies {
 
     implementation("androidx.datastore:datastore-preferences:1.1.2")
 
-    // Coil — обложки видео
     implementation("io.coil-kt:coil-compose:2.7.0")
 }

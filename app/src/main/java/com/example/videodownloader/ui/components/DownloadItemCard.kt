@@ -88,6 +88,7 @@ fun DownloadItemCard(
 
             Spacer(Modifier.width(12.dp))
 
+            // Информация
             Column(Modifier.weight(1f)) {
                 Text(
                     item.title,
@@ -152,18 +153,20 @@ fun DownloadItemCard(
 
             Spacer(Modifier.width(4.dp))
 
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                if (item.status == "COMPLETED") {
-                    IconButton(onClick = { onOpen(item) }) {
-                        Text("▶️", style = MaterialTheme.typography.titleMedium)
-                    }
-                    IconButton(onClick = { onOpenFolder(item) }) {
-                        Text("📁", style = MaterialTheme.typography.titleMedium)
-                    }
+            // Кнопки в один ряд: 📁 🗑
+            if (item.status == "COMPLETED") {
+                IconButton(
+                    onClick = { onOpenFolder(item) },
+                    modifier = Modifier.size(36.dp)
+                ) {
+                    Text("📁", style = MaterialTheme.typography.titleMedium)
                 }
-                IconButton(onClick = onDelete) {
-                    Text("🗑", style = MaterialTheme.typography.titleMedium)
-                }
+            }
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(36.dp)
+            ) {
+                Text("🗑", style = MaterialTheme.typography.titleMedium)
             }
         }
     }

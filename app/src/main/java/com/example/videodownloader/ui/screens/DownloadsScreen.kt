@@ -57,7 +57,7 @@ fun DownloadsScreen(
                         item = item,
                         onDelete = { onDelete(item) },
                         onOpen = { openVideo(context, it) },
-                        onOpenFolder = { openFolder(context) }
+                        onOpenFolder = { openFolder(context, it) }
                     )
                 }
             }
@@ -96,45 +96,69 @@ private fun openVideo(context: android.content.Context, item: DownloadEntity) {
 }
 
 /**
- * Открывает папку DCIM/VideoDownloader напрямую через ExternalStorageProvider.
- * Это работает на всех Android 5+, независимо от MediaStore-URI.
+ * Открывает папку, в которой лежит видео.
+ * Определяет сервис по URL/имени и открывает соответствующую подпапку
+ * через ExternalStorageProvider.
  */
-private fun openFolder(context: android.content.Context) {
-    // URI папки через встроенный ExternalStorageProvider
+private fun openFolder(context: android.content.Context, item: DownloadEntity) {
+    // Определяем сервис
+    val service = detectService(item)
+
+    // URI папки: primary:DCIM/VideoDownloader/{service}
+    val encodedPath = android.net.Uri.encode("DCIM/VideoDownloader/$service")
     val folderUri = Uri.parse(
-        "content://com.android.externalstorage.documents/document/primary%3ADCIM%2FVideoDownloader"
+        "content://com.android.externalstorage.documents/document/primary%3A$encodedPath"
     )
 
-    // Вариант 1: открыть как директорию в файловом менеджере
-    val intent1 = Intent(Intent.ACTION_VIEW).apply {
+    // Вариант 1: файловый менеджер откроет директорию
+    val intent = Intent(Intent.ACTION_VIEW).apply {
         setDataAndType(folderUri, "vnd.android.document/directory")
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
 
     try {
-        context.startActivity(intent1)
+        context.startActivity(intent)
         return
     } catch (_: Exception) { }
 
-    // Вариант 2: открыть через ACTION_OPEN_DOCUMENT_TREE (выбор папки)
-    val intent2 = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+    // Вариант 2: если никто не обработал — откроем корень VideoDownloader
+    val rootEncoded = android.net.Uri.encode("DCIM/VideoDownloader")
+    val rootUri = Uri.parse(
+        "content://com.android.externalstorage.documents/document/primary%3A$rootEncoded"
+    )
+    val fallbackIntent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(rootUri, "vnd.android.document/directory")
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     }
     try {
-        context.startActivity(intent2)
-        Toast.makeText(
-            context,
-            "Выберите папку DCIM → VideoDownloader",
-            Toast.LENGTH_LONG
-        ).show()
+        context.startActivity(fallbackIntent)
         return
     } catch (_: Exception) { }
 
     Toast.makeText(
         context,
-        "Не удалось открыть папку. Откройте вручную: DCIM/VideoDownloader",
+        "Не удалось открыть папку. Путь: DCIM/VideoDownloader/$service",
         Toast.LENGTH_LONG
     ).show()
+}
+
+private fun detectService(item: DownloadEntity): String {
+    val url = item.url.lowercase()
+    val title = item.title.lowercase()
+    val path = (item.filePath ?: "").lowercase()
+    return when {
+        url.contains("tiktok") || title.contains("tiktok") || path.contains("tiktok") -> "TikTok"
+        url.contains("youtube") || url.contains("youtu.be") ||
+                title.contains("youtube") || path.contains("youtube") -> "YouTube"
+        url.contains("instagram") || title.contains("instagram") ||
+                path.contains("instagram") -> "Instagram"
+        url.contains("facebook") || url.contains("fb.watch") ||
+                title.contains("facebook") || path.contains("facebook") -> "Facebook"
+        url.contains("twitter") || url.contains("x.com") ||
+                title.contains("twitter") || path.contains("twitter") -> "Twitter"
+        url.contains("vk.com") || path.contains("vk") -> "VK"
+        else -> "Другое"
+    }
 }

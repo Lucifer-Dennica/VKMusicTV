@@ -11,7 +11,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.videodownloader.ui.screens.*
 import com.example.videodownloader.ui.theme.VideoDownloaderTheme
@@ -79,7 +78,7 @@ private fun VideoDownloaderRoot(
         Box(Modifier.padding(pad)) {
             when (tab) {
                 0 -> HomeScreen(sharedLink, active, vm::enqueue, vm::delete)
-                1 -> DownloadsScreen(completed, vm::delete)
+                1 -> DownloadsScreen(completed, vm::delete, vm::rescanFolder)
                 else -> SettingsScreen(onChooseFolder)
             }
         }

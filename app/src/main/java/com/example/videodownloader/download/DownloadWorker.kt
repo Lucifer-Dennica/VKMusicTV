@@ -88,7 +88,11 @@ class DownloadWorker(
             }
             lower.contains("youtube.com") || lower.contains("youtu.be") -> {
                 Log.d(TAG, "→ YouTube → yt-dlp")
-                resolveYouTubeViaYtdlp(url)
+                resolveViaYtdlp(url)
+            }
+            lower.contains("instagram.com") -> {
+                Log.d(TAG, "→ Instagram → yt-dlp")
+                resolveViaYtdlp(url)
             }
             else -> {
                 Log.d(TAG, "→ Остальное → Cobalt")
@@ -102,33 +106,24 @@ class DownloadWorker(
     // =========================================================
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
-        Log.d(TAG, "GET $api")
-
         val json = httpGetString(api, timeoutMs = 20_000)
             ?: throw Exception("tikwm не ответил")
-
         val obj = JSONObject(json)
         val code = obj.optInt("code", -1)
-        if (code != 0) {
-            throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
-        }
-
-        val data = obj.optJSONObject("data")
-            ?: throw Exception("tikwm: нет поля data")
-
+        if (code != 0) throw Exception("tikwm: ${obj.optString("msg", "unknown error")}")
+        val data = obj.optJSONObject("data") ?: throw Exception("tikwm: нет поля data")
         val video = data.optString("play").ifBlank { null }
             ?: data.optString("hdplay").ifBlank { null }
             ?: throw Exception("tikwm: нет ссылки на видео")
-
         val cover = data.optString("cover").ifBlank { null }
         Log.d(TAG, "TikTok OK")
         return Resolved(video, cover)
     }
 
     // =========================================================
-    // YouTube — через свой yt-dlp сервер на Railway
+    // YouTube + Instagram → через свой yt-dlp сервер (макс. качество)
     // =========================================================
-    private fun resolveYouTubeViaYtdlp(url: String): Resolved? {
+    private fun resolveViaYtdlp(url: String): Resolved? {
         val body = """{"url":"$url"}"""
         val response = httpPostJson(YTDLP_URL, body, timeoutMs = 60_000)
             ?: throw Exception("yt-dlp сервер не ответил")
@@ -140,12 +135,12 @@ class DownloadWorker(
         val video = obj.optString("video_url").ifBlank { null }
             ?: throw Exception("yt-dlp: нет ссылки")
         val thumb = obj.optString("thumbnail").ifBlank { null }
-        Log.d(TAG, "YouTube OK через yt-dlp")
+        Log.d(TAG, "OK через yt-dlp")
         return Resolved(video, thumb)
     }
 
     // =========================================================
-    // Cobalt — для Instagram, Facebook, VK, Twitter и др.
+    // Cobalt — для VK, Facebook, Twitter, Reddit и др.
     // =========================================================
     private fun resolveCobalt(url: String): Resolved? {
         val instances = listOf(
@@ -156,7 +151,8 @@ class DownloadWorker(
             "https://api.cobalt.best/",
             COBALT_URL
         )
-        val body = """{"url":"$url","videoQuality":"720"}"""
+        // max качество
+        val body = """{"url":"$url","videoQuality":"max"}"""
         var lastError = "Нет инстансов"
 
         for (base in instances) {
@@ -186,7 +182,6 @@ class DownloadWorker(
                 Log.w(TAG, "Cobalt $base: $lastError")
             }
         }
-
         throw Exception("Cobalt: $lastError")
     }
 
@@ -333,11 +328,7 @@ class DownloadWorker(
         const val KEY_ERROR = "error"
         private const val USER_AGENT =
             "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
-
-        // Твой yt-dlp сервер на Railway
         private const val YTDLP_URL = "https://ytdlp-server-production-16c0.up.railway.app/api/resolve"
-
-        // Твой Cobalt на Railway (для Instagram, Facebook и др.)
         private const val COBALT_URL = "https://cobalt-tools-production-e535.up.railway.app/"
     }
 }

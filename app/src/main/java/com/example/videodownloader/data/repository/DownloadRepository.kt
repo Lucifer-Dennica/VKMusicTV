@@ -4,6 +4,7 @@ import android.content.ContentUris
 import android.content.Context
 import android.os.Build
 import android.provider.MediaStore
+import android.util.Log
 import com.example.videodownloader.data.local.*
 import kotlinx.coroutines.flow.Flow
 
@@ -22,8 +23,8 @@ class DownloadRepository(context: Context) {
     suspend fun delete(item: DownloadEntity) = dao.delete(item)
 
     /**
-     * Сканирует папку DCIM/VideoDownloader через MediaStore
-     * и добавляет в базу те файлы, которых там ещё нет.
+     * Сканирует все видео из DCIM/VideoDownloader/ (и все подпапки)
+     * и добавляет отсутствующие в базу.
      */
     suspend fun scanFolder() {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return
@@ -34,7 +35,6 @@ class DownloadRepository(context: Context) {
             MediaStore.Video.Media.DATE_ADDED,
             MediaStore.Video.Media.RELATIVE_PATH
         )
-
         val selection = "${MediaStore.Video.Media.RELATIVE_PATH} LIKE ?"
         val selectionArgs = arrayOf("%DCIM/VideoDownloader%")
         val sortOrder = "${MediaStore.Video.Media.DATE_ADDED} DESC"
@@ -61,7 +61,6 @@ class DownloadRepository(context: Context) {
                     )
                     val uriStr = uri.toString()
 
-                    // Проверяем, есть ли уже такая запись
                     if (dao.getByPath(uriStr) == null) {
                         dao.insert(
                             DownloadEntity(
@@ -73,11 +72,12 @@ class DownloadRepository(context: Context) {
                                 createdAt = dateSec * 1000
                             )
                         )
+                        Log.d("DownloadRepository", "scanFolder: добавлен $name")
                     }
                 }
             }
         } catch (e: Exception) {
-            // игнорируем — просто не добавится ничего лишнего
+            Log.e("DownloadRepository", "scanFolder error: ${e.message}")
         }
     }
 }

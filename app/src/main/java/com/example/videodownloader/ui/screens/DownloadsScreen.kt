@@ -2,6 +2,7 @@ package com.example.videodownloader.ui.screens
 
 import android.content.Intent
 import android.net.Uri
+import android.os.Environment
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -96,41 +97,47 @@ private fun openVideo(context: android.content.Context, item: DownloadEntity) {
 }
 
 /**
- * Открывает папку, в которой лежит видео.
- * Определяет сервис по URL/имени и открывает соответствующую подпапку
- * через ExternalStorageProvider.
+ * Открывает папку с видео — пробует несколько способов,
+ * чтобы сработало на любом файловом менеджере.
  */
 private fun openFolder(context: android.content.Context, item: DownloadEntity) {
     val service = detectService(item)
     val path = "DCIM/VideoDownloader/$service"
-    
-    // Способ 1: через стандартный файловый менеджер
-    val intent = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(Uri.parse("file://${Environment.getExternalStorageDirectory()}/$path"), "resource/folder")
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    
+
+    // Способ 1: открыть через file:// (работает на старых файловых менеджерах)
     try {
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(
+                Uri.parse("file://${Environment.getExternalStorageDirectory()}/$path"),
+                "resource/folder"
+            )
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
         context.startActivity(intent)
         return
     } catch (_: Exception) { }
-    
-    // Способ 2: через ExternalStorageProvider (для Android 10+)
-    val encodedPath = Uri.encode(path)
-    val folderUri = Uri.parse("content://com.android.externalstorage.documents/document/primary%3A$encodedPath")
-    val intent2 = Intent(Intent.ACTION_VIEW).apply {
-        setDataAndType(folderUri, "vnd.android.document/directory")
-        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    }
-    
+
+    // Способ 2: через ExternalStorageProvider (Android 10+)
     try {
-        context.startActivity(intent2)
+        val encodedPath = Uri.encode(path)
+        val folderUri = Uri.parse(
+            "content://com.android.externalstorage.documents/document/primary%3A$encodedPath"
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(folderUri, "vnd.android.document/directory")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        context.startActivity(intent)
         return
     } catch (_: Exception) { }
-    
-    // Способ 3: показать путь пользователю
-    Toast.makeText(context, "Путь: $path", Toast.LENGTH_LONG).show()
+
+    // Способ 3: если ничего не сработало — показать путь
+    Toast.makeText(
+        context,
+        "Путь: $path",
+        Toast.LENGTH_LONG
+    ).show()
 }
 
 private fun detectService(item: DownloadEntity): String {
@@ -148,6 +155,10 @@ private fun detectService(item: DownloadEntity): String {
         url.contains("twitter") || url.contains("x.com") ||
                 title.contains("twitter") || path.contains("twitter") -> "Twitter"
         url.contains("vk.com") || path.contains("vk") -> "VK"
+        url.contains("reddit") || path.contains("reddit") -> "Reddit"
+        url.contains("pinterest") || url.contains("pin.it") ||
+                path.contains("pinterest") -> "Pinterest"
+        url.contains("snapchat") || path.contains("snapchat") -> "Snapchat"
         else -> "Другое"
     }
 }

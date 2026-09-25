@@ -33,11 +33,25 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestPermission()
     ) { }
 
+    private val mediaPermission = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        // Уведомления (Android 13+)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
+
+        // Чтение медиа (для сканирования папки)
+        val mediaPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            Manifest.permission.READ_MEDIA_VIDEO
+        } else {
+            Manifest.permission.READ_EXTERNAL_STORAGE
+        }
+        mediaPermission.launch(mediaPerm)
 
         val shared = if (intent?.action == Intent.ACTION_SEND) {
             intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty()

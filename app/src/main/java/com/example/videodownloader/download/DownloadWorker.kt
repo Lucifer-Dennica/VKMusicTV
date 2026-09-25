@@ -80,7 +80,6 @@ class DownloadWorker(
 
     data class Resolved(val videoUrl: String, val thumbnail: String?)
 
-    /** Определяет подпапку по URL. */
     private fun getServiceFolder(url: String): String {
         val lower = url.lowercase()
         return when {
@@ -103,48 +102,43 @@ class DownloadWorker(
     }
 
     /**
-     * Маршрутизация по источнику:
-     * - TikTok → tikwm (быстрее, стабильнее)
-     * - YouTube, Instagram → свой yt-dlp сервер
-     * - Всё остальное → Cobalt
-     * - Прямые ссылки на файлы → скачиваются как есть
+     * TikTok → tikwm (быстрее, не трогаем)
+     * YouTube, Instagram, VK, Facebook → yt-dlp сервер
+     * Остальные → Cobalt
      */
     private fun resolveDirectUrl(url: String): Resolved? {
         val lower = url.lowercase()
         return when {
-            // TikTok — через tikwm (не трогаем, работает)
+            // TikTok — через tikwm (не трогаем)
             lower.contains("tiktok.com") -> resolveTikTok(url)
 
-            // YouTube и Instagram — через yt-dlp
+            // YouTube, Instagram, VK, Facebook — через yt-dlp
             lower.contains("youtube.com") || lower.contains("youtu.be") -> resolveViaYtdlp(url)
             lower.contains("instagram.com") -> resolveViaYtdlp(url)
+            lower.contains("vk.com") -> resolveViaYtdlp(url)
+            lower.contains("facebook.com") || lower.contains("fb.watch") -> resolveViaYtdlp(url)
 
-            // Facebook, VK, Twitter, Reddit, Pinterest, Snapchat,
-            // Vimeo, Dailymotion, Twitch, Rutube, SoundCloud и др. — через Cobalt
-            lower.contains("facebook.com") || lower.contains("fb.watch") ||
-            lower.contains("vk.com") || lower.contains("twitter.com") ||
-            lower.contains("x.com") || lower.contains("reddit.com") ||
-            lower.contains("pinterest.com") || lower.contains("pin.it") ||
-            lower.contains("snapchat.com") || lower.contains("vimeo.com") ||
-            lower.contains("dailymotion.com") || lower.contains("twitch.tv") ||
-            lower.contains("rumble.com") || lower.contains("odysee.com") ||
-            lower.contains("soundcloud.com") || lower.contains("rutube.ru") ||
-            lower.contains("linkedin.com") || lower.contains("threads.net") ||
-            lower.contains("tumblr.com") -> resolveCobalt(url)
+            // Twitter, Reddit, Pinterest, Snapchat, Vimeo, Dailymotion,
+            // Twitch, Rutube, SoundCloud и т.д. — через Cobalt
+            lower.contains("twitter.com") || lower.contains("x.com") ||
+            lower.contains("reddit.com") || lower.contains("pinterest.com") ||
+            lower.contains("pin.it") || lower.contains("snapchat.com") ||
+            lower.contains("vimeo.com") || lower.contains("dailymotion.com") ||
+            lower.contains("twitch.tv") || lower.contains("rumble.com") ||
+            lower.contains("odysee.com") || lower.contains("soundcloud.com") ||
+            lower.contains("rutube.ru") || lower.contains("linkedin.com") ||
+            lower.contains("threads.net") || lower.contains("tumblr.com") -> resolveCobalt(url)
 
-            // Прямые ссылки на файлы — качаем как есть
+            // Прямые ссылки на файлы
             lower.endsWith(".mp4") || lower.endsWith(".webm") ||
             lower.endsWith(".mov") || lower.endsWith(".m4v") -> Resolved(url, null)
 
-            // Всё остальное — пробуем через Cobalt
             else -> resolveCobalt(url)
         }
     }
 
     // =========================================================
     // TikTok — через tikwm. ЛОГИКА НЕ ТРОНУТА.
-    // tikwm сам разворачивает короткие ссылки (vm.tiktok.com, vt.tiktok.com),
-    // работает и с полными (www.tiktok.com/@user/video/...).
     // =========================================================
     private fun resolveTikTok(url: String): Resolved? {
         val api = "https://tikwm.com/api/?url=" + URLEncoder.encode(url, "UTF-8") + "&hd=1"
@@ -172,7 +166,7 @@ class DownloadWorker(
     }
 
     // =========================================================
-    // YouTube, Instagram — через yt-dlp сервер
+    // YouTube, Instagram, VK, Facebook — через yt-dlp
     // =========================================================
     private fun resolveViaYtdlp(url: String): Resolved? {
         val body = """{"url":"$url"}"""
@@ -187,7 +181,7 @@ class DownloadWorker(
                 throw Exception("YouTube требует авторизацию. См. Настройки → YouTube")
             }
             if (detail.contains("login", ignoreCase = true)) {
-                throw Exception("Instagram требует авторизацию. См. Настройки → Instagram")
+                throw Exception("Требуется авторизация. См. Настройки")
             }
             throw Exception("yt-dlp: " + detail.take(150))
         }
@@ -199,7 +193,7 @@ class DownloadWorker(
     }
 
     // =========================================================
-    // Cobalt — для всех остальных сервисов
+    // Cobalt — для остальных сервисов
     // =========================================================
     private fun resolveCobalt(url: String): Resolved? {
         val instances = listOf(
@@ -321,7 +315,6 @@ class DownloadWorker(
         } finally { conn.disconnect() }
     }
 
-    /** Сохраняет в DCIM/VideoDownloader/{service}/filename.mp4 */
     private fun saveToPublicDcim(tempFile: File, fileName: String, service: String): String {
         val relativePath = Environment.DIRECTORY_DCIM + "/VideoDownloader/" + service + "/"
 
